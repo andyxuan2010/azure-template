@@ -1,0 +1,588 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+name: $(Build.Repository.Name)-pipeline
+
+trigger:
+  branches:
+    include:
+      - main
+pool:
+  name: 'IaCRunner'
+  demands:
+  - Agent.OS -equals Linux
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: IaC/template
+      ref: refs/heads/main
+
+
+variables:
+  - name: env
+    ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
+      value: 'prod'
+    ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
+      value: 'dev'
+    ${{ if eq(variables['Build.SourceBranchName'], 'sbx') }}:
+      value: 'sbx'
+  - name: subscription
+    ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
+      value: 'prod'
+    ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
+      value: 'nonprod'
+    ${{ if eq(variables['Build.SourceBranchName'], 'sbx') }}:
+      value: 'sbx'
+  - name: keyVaultName
+    value: 'kvplatformeusdev'
+  - name: targetPatSecretName
+    value: 'AZURE-DEVOPS-SYNC-PAT'
+  - name: targetOrganizationSecretName
+    value: 'AZURE-DEVOPS-SYNC-ORGANIZATION'
+  - name: targetProjectSecretName
+    value: 'AZURE-DEVOPS-SYNC-PROJECT'
+  - name: sourceRepositoryUri
+    value: 'https://dev.azure.com/CCOE-Azure/IaC/_git/template'
+  - name: syncBotIdentity
+    value: 'ADO Repo Sync Bot'
+
+stages:
+  - stage: ValidatePlan
+    displayName: Validate and Plan
+    condition: or(eq(variables['Build.Repository.Uri'], variables['sourceRepositoryUri']), ne(variables['Build.RequestedFor'], variables['syncBotIdentity']))
+    jobs:
+      - job: terraform_plan
+        displayName: Terraform Plan
+        steps:
+          - template: templates/shared-runner-hygiene.yml@templates
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+
+          - bash: |
+              set -eu
+              if [ -z "${SYSTEM_ACCESSTOKEN:-}" ]; then
+                echo "System.AccessToken is not available" >&2
+                exit 1
+              fi
+
+              git config --global http.https://dev.azure.com/CCOE-Azure/.extraheader "AUTHORIZATION: bearer ${SYSTEM_ACCESSTOKEN}"
+            displayName: Configure Git auth for Terraform module downloads
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - task: AzureCLI@2
+            displayName: Terraform Init
+            inputs:
+              azureSubscription: 'sc-ccoe-iac-devops-${{variables.subscription}}'
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+                terraform init -input=false -no-color -reconfigure
+
+          - bash: |
+              set -euo pipefail
+              terraform fmt -check -recursive
+            displayName: "Terraform fmt check"
+
+          - task: AzureCLI@2
+            displayName: Terraform validate
+            inputs:
+              azureSubscription: 'sc-ccoe-iac-devops-${{variables.subscription}}'
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+                terraform validate
+
+          - task: AzureCLI@2
+            displayName: Terraform root harness test
+            inputs:
+              azureSubscription: 'sc-ccoe-iac-devops-${{variables.subscription}}'
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+                terraform test -filter=tests/root-plan.tftest.hcl -no-color
+
+          - task: AzureCLI@2
+            displayName: Terraform Plan
+            inputs:
+              azureSubscription: 'sc-ccoe-iac-devops-${{variables.subscription}}'
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+                terraform plan -input=false -no-color
+
+          - template: templates/shared-runner-hygiene.yml@templates
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+      - job: validate_modules
+        displayName: Validate Module Harness
+        condition: false
+        dependsOn: terraform_plan
+        strategy:
+          maxParallel: 4
+          matrix:
+            acr:
+              moduleName: acr
+            adf:
+              moduleName: adf
+            aks:
+              moduleName: aks
+            appregistration:
+              moduleName: appregistration
+            appservice:
+              moduleName: appservice
+            appserviceplan:
+              moduleName: appserviceplan
+            applicationgateway:
+              moduleName: applicationgateway
+            automationaccount:
+              moduleName: automationaccount
+            azure_ai_service:
+              moduleName: azure_ai_service
+            databricks:
+              moduleName: databricks
+            eventhub:
+              moduleName: eventhub
+            firewall:
+              moduleName: firewall
+            functionapp:
+              moduleName: functionapp
+            keyvault:
+              moduleName: keyvault
+            linuxvm:
+              moduleName: linuxvm
+            loganalytics:
+              moduleName: loganalytics
+            logicapp:
+              moduleName: logicapp
+            managedidentity:
+              moduleName: managedidentity
+            managementgroups:
+              moduleName: managementgroups
+            nsg:
+              moduleName: nsg
+            openai:
+              moduleName: openai
+            policy:
+              moduleName: policy
+            private_dns:
+              moduleName: private_dns
+            rg:
+              moduleName: rg
+            roleassignments:
+              moduleName: roleassignments
+            route_table:
+              moduleName: route_table
+            servicebus:
+              moduleName: servicebus
+            sqldb:
+              moduleName: sqldb
+            sqlmi:
+              moduleName: sqlmi
+            sqlmi_db:
+              moduleName: sqlmi_db
+            storageaccount:
+              moduleName: storageaccount
+            subscription_vending:
+              moduleName: subscription_vending
+            vnet:
+              moduleName: vnet
+            winvm:
+              moduleName: winvm
+        steps:
+          - template: templates/shared-runner-hygiene.yml@templates
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+
+          - bash: |
+              set -eu
+              if [ -z "${SYSTEM_ACCESSTOKEN:-}" ]; then
+                echo "System.AccessToken is not available" >&2
+                exit 1
+              fi
+
+              git config --global http.https://dev.azure.com/CCOE-Azure/.extraheader "AUTHORIZATION: bearer ${SYSTEM_ACCESSTOKEN}"
+            displayName: Configure Git auth for Terraform module downloads
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - bash: |
+              set -euo pipefail
+
+              modules=(
+                acr adf aks appregistration appservice appserviceplan applicationgateway automationaccount
+                azure_ai_service databricks eventhub firewall functionapp keyvault
+                linuxvm loganalytics logicapp managedidentity managementgroups nsg
+                openai policy private_dns rg roleassignments route_table servicebus
+                sqldb sqlmi sqlmi_db storageaccount subscription_vending vnet winvm
+              )
+
+              enabled_modules=("$(moduleName)")
+              case "$(moduleName)" in
+                appservice)
+                  enabled_modules+=(appserviceplan)
+                  ;;
+                functionapp|logicapp)
+                  enabled_modules+=(appserviceplan storageaccount)
+                  ;;
+                sqlmi)
+                  enabled_modules+=(vnet)
+                  ;;
+                sqlmi_db)
+                  enabled_modules+=(sqlmi vnet)
+                  ;;
+              esac
+
+              output_file="$(Agent.TempDirectory)/module-plan.tfvars.json"
+
+              {
+                echo "{"
+                echo '  "module_plan_enabled": {'
+
+                for i in "${!modules[@]}"; do
+                  module_name="${modules[$i]}"
+                  enabled=false
+
+                  for enabled_module in "${enabled_modules[@]}"; do
+                    if [ "$module_name" = "$enabled_module" ]; then
+                      enabled=true
+                      break
+                    fi
+                  done
+
+                  suffix=","
+                  if [ "$i" -eq $((${#modules[@]} - 1)) ]; then
+                    suffix=""
+                  fi
+
+                  echo "    \"$module_name\": $enabled$suffix"
+                done
+
+                echo "  }"
+                echo "}"
+              } > "$output_file"
+
+              echo "Generated overrides for module $(moduleName):"
+              cat "$output_file"
+            displayName: Build module harness overrides
+
+          - task: AzureCLI@2
+            displayName: Terraform init and plan module harness
+            inputs:
+              azureSubscription: 'sc-ccoe-iac-devops-${{variables.subscription}}'
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+
+                module_harness_dir="$(Agent.TempDirectory)/module-harness"
+                rm -rf "${module_harness_dir}"
+                mkdir -p "${module_harness_dir}"
+
+                rsync -a --delete ./ "${module_harness_dir}/"
+
+                MODULE_HARNESS_DIR="${module_harness_dir}" python - <<'PY'
+                import os
+                from pathlib import Path
+
+                backend_file = Path(os.environ["MODULE_HARNESS_DIR"]) / "backend.tf"
+                text = backend_file.read_text()
+                needle = '  backend "azurerm" {'
+                start = text.find(needle)
+                if start == -1:
+                    raise SystemExit("backend block not found in backend.tf")
+
+                brace_depth = 0
+                end = None
+                for index in range(start, len(text)):
+                    char = text[index]
+                    if char == "{":
+                        brace_depth += 1
+                    elif char == "}":
+                        brace_depth -= 1
+                        if brace_depth == 0:
+                            end = index + 1
+                            break
+
+                if end is None:
+                    raise SystemExit("backend block in backend.tf was not closed")
+
+                trimmed = text[:start] + text[end:]
+                backend_file.write_text(trimmed)
+                PY
+
+                cd "${module_harness_dir}"
+                terraform init -backend=false -input=false -no-color -reconfigure
+                terraform plan -input=false -no-color -lock=false -var-file="$(Agent.TempDirectory)/module-plan.tfvars.json"
+
+          - template: templates/shared-runner-hygiene.yml@templates
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+  - stage: Apply
+    displayName: Apply
+    dependsOn: ValidatePlan
+    condition: false
+    jobs:
+      - job: terraform_apply
+        displayName: Terraform Apply
+        steps:
+          - template: templates/shared-runner-hygiene.yml@templates
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+
+          # - task: TerraformInstaller@1
+          #   inputs:
+          #     terraformVersion: 'latest'
+
+          - bash: |
+              set -eu
+              if [ -z "${SYSTEM_ACCESSTOKEN:-}" ]; then
+                echo "System.AccessToken is not available" >&2
+                exit 1
+              fi
+
+              git config --global http.https://dev.azure.com/CCOE-Azure/.extraheader "AUTHORIZATION: bearer ${SYSTEM_ACCESSTOKEN}"
+            displayName: Configure Git auth for Terraform module downloads
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - task: AzureCLI@2
+            displayName: Terraform Init
+            inputs:
+              azureSubscription: 'sc-ccoe-iac-devops-${{variables.subscription}}'
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+                terraform init -input=false -no-color -reconfigure
+
+          - task: AzureCLI@2
+            displayName: Terraform Apply
+            inputs:
+              azureSubscription: 'sc-ccoe-iac-devops-${{variables.subscription}}'
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+                terraform apply -auto-approve -input=false -no-color
+
+          - template: templates/shared-runner-hygiene.yml@templates
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+  - stage: Sync
+    displayName: Sync Repo
+    dependsOn: ValidatePlan
+    #condition: and(succeeded('ValidatePlan'), eq(variables['Build.Repository.Uri'], variables['sourceRepositoryUri']))
+    condition: false
+    jobs:
+      - job: repo_sync
+        displayName: Mirror Repository
+        steps:
+          - checkout: self
+            persistCredentials: true
+            fetchDepth: 0
+
+          - script: |
+              set -euo pipefail
+
+              echo "Authenticating Azure CLI with managed identity"
+              az login --identity --allow-no-subscriptions --only-show-errors >/dev/null
+
+              get_secret() {
+                az keyvault secret show \
+                  --name "$1" \
+                  --vault-name "$(keyVaultName)" \
+                  --query value \
+                  --output tsv \
+                  --only-show-errors
+              }
+
+              echo "Retrieving $(targetPatSecretName) from Key Vault $(keyVaultName)"
+              target_pat="$(get_secret "$(targetPatSecretName)")"
+              echo "Retrieving $(targetOrganizationSecretName) from Key Vault $(keyVaultName)"
+              target_organization="$(get_secret "$(targetOrganizationSecretName)")"
+              echo "Retrieving $(targetProjectSecretName) from Key Vault $(keyVaultName)"
+              target_project="$(get_secret "$(targetProjectSecretName)")"
+
+              if [ -z "${target_pat}" ] || [ "${target_pat}" = "null" ]; then
+                echo "Secret $(targetPatSecretName) in Key Vault $(keyVaultName) was empty or unreadable" >&2
+                az account clear >/dev/null 2>&1 || true
+                exit 1
+              fi
+              if [ -z "${target_organization}" ] || [ "${target_organization}" = "null" ]; then
+                echo "Secret $(targetOrganizationSecretName) in Key Vault $(keyVaultName) was empty or unreadable" >&2
+                az account clear >/dev/null 2>&1 || true
+                exit 1
+              fi
+              if [ -z "${target_project}" ] || [ "${target_project}" = "null" ]; then
+                echo "Secret $(targetProjectSecretName) in Key Vault $(keyVaultName) was empty or unreadable" >&2
+                az account clear >/dev/null 2>&1 || true
+                exit 1
+              fi
+
+              echo "##vso[task.setvariable variable=TARGET_PAT;issecret=true]${target_pat}"
+              echo "##vso[task.setvariable variable=TARGET_ORGANIZATION]${target_organization}"
+              echo "##vso[task.setvariable variable=TARGET_PROJECT]${target_project}"
+
+              az account clear >/dev/null 2>&1 || true
+            displayName: "Retrieve sync settings from Key Vault"
+
+          - script: |
+              set -euo pipefail
+              if [ -z "${TARGET_PAT:-}" ]; then
+                echo "TARGET_PAT is not set. Managed identity secret retrieval did not succeed." >&2
+                exit 1
+              fi
+              if [ -z "${TARGET_ORGANIZATION:-}" ]; then
+                echo "TARGET_ORGANIZATION is not set. Managed identity secret retrieval did not succeed." >&2
+                exit 1
+              fi
+              if [ -z "${TARGET_PROJECT:-}" ]; then
+                echo "TARGET_PROJECT is not set. Managed identity secret retrieval did not succeed." >&2
+                exit 1
+              fi
+
+              git config --global user.email "sync@"
+              git config --global user.name "ADO Repo Sync Bot"
+
+              export GIT_TERMINAL_PROMPT=0
+              target_repo_url="https://azdo:${TARGET_PAT}@dev.azure.com/${TARGET_ORGANIZATION}/${TARGET_PROJECT}/_git/template"
+              source_sha="$(git rev-parse HEAD)"
+
+              echo "Mirroring repository to organization '${TARGET_ORGANIZATION}', project '${TARGET_PROJECT}', repo 'template'"
+              echo "Source HEAD: ${source_sha}"
+
+              git fetch origin --prune
+
+              git -c credential.helper= \
+                push "${target_repo_url}" --all --force
+
+              git -c credential.helper= \
+                push "${target_repo_url}" --tags --force
+
+              target_main_sha="$(git ls-remote "${target_repo_url}" refs/heads/main | awk '{print $1}')"
+
+              echo "Target main after push: ${target_main_sha}"
+
+              if [ -z "${target_main_sha}" ]; then
+                echo "Unable to resolve target main after push." >&2
+                exit 1
+              fi
+
+              if [ "${source_sha}" != "${target_main_sha}" ]; then
+                echo "Target repo main does not match source HEAD after push." >&2
+                exit 1
+              fi
+            displayName: "Mirror source repo to target repo"
+            env:
+              TARGET_PAT: $(TARGET_PAT)
+              TARGET_ORGANIZATION: $(TARGET_ORGANIZATION)
+              TARGET_PROJECT: $(TARGET_PROJECT)
