@@ -1,0 +1,54 @@
+provider "azurerm" {
+  features {}
+}
+
+provider "azuread" {}
+
+variables {
+  resource_group_name                          = "rg-ba-eus-prd-shared-management"
+  location                                     = "eastus"
+  name                                         = "oai-iactest-prod-001"
+  sku_name                                     = "S0"
+  custom_subdomain_name                        = ""
+  public_network_access_enabled                = true
+  outbound_network_access_restricted           = false
+  local_auth_enabled                           = true
+  dynamic_throttling_enabled                   = false
+  custom_question_answering_search_service_id  = ""
+  custom_question_answering_search_service_key = ""
+  identity                                     = null
+  customer_managed_key                         = null
+  network_acls                                 = null
+  enable_private_endpoint                      = false
+  private_endpoint_subnet_id                   = ""
+  private_endpoint_subnet_name                 = ""
+  private_endpoint_vnet_name                   = ""
+  private_endpoint_network_resource_group_name = ""
+  private_dns_zone_id                          = ""
+  deployments                                  = {}
+  app_admin_group                              = []
+  app_user_group                               = []
+  enable_diagnostics                           = false
+  log_analytics_workspace_id                   = ""
+  diagnostic_log_categories                    = []
+  diagnostic_metric_categories                 = ["AllMetrics"]
+  tags = {
+    Environment = "Production"
+    Owner       = "CCOE"
+    IaC         = "Terraform"
+  }
+}
+
+run "plan" {
+  command = plan
+
+  assert {
+    condition     = output.name == var.name
+    error_message = "Azure OpenAI account test name was not propagated to the module."
+  }
+
+  assert {
+    condition     = output.merged_tags.module == "openai"
+    error_message = "Azure OpenAI merged tags did not include the module marker."
+  }
+}
