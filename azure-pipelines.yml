@@ -1,0 +1,406 @@
+parameters:
+  - name: azureSubscription
+    type: string
+    default: 'sc-platform-prod'
+
+name: $(Build.Repository.Name)
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - main
+
+pr: none
+
+pool:
+  name: 'Azure Pipelines'
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - name: terraformVersion
+    value: '1.10.5'
+  - name: TF_BACKEND_READY
+    value: 'false'
+
+stages:
+  - stage: Validate
+    displayName: Common Validation
+    jobs:
+      - job: terraform_validate
+        displayName: Terraform Validate
+        steps:
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+
+          - task: Bash@3
+            displayName: Install Terraform
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                curl -fsSL "https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip" -o terraform.zip
+                unzip -o terraform.zip -d "$(Agent.TempDirectory)/terraform"
+                echo "##vso[task.prependpath]$(Agent.TempDirectory)/terraform"
+                "$(Agent.TempDirectory)/terraform/terraform" version
+
+          - task: Bash@3
+            displayName: Configure Git auth for Terraform module downloads
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                if [ -z "${SYSTEM_ACCESSTOKEN:-}" ]; then
+                  echo "System.AccessToken is not available" >&2
+                  exit 1
+                fi
+
+                git config --global http.https://dev.azure.com/CCOE-Azure/.extraheader "AUTHORIZATION: bearer ${SYSTEM_ACCESSTOKEN}"
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - task: Bash@3
+            displayName: Terraform init without backend
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                terraform init -input=false -no-color -backend=false
+
+          - task: Bash@3
+            displayName: Terraform fmt and validate
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                terraform fmt -check -recursive
+                terraform validate
+
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+  - stage: Plan
+    displayName: Terraform Plan
+    dependsOn: Validate
+    condition: succeeded()
+    jobs:
+      - job: terraform_plan
+        displayName: Terraform Plan
+        steps:
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+
+          - task: Bash@3
+            displayName: Install Terraform
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                curl -fsSL "https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip" -o terraform.zip
+                unzip -o terraform.zip -d "$(Agent.TempDirectory)/terraform"
+                echo "##vso[task.prependpath]$(Agent.TempDirectory)/terraform"
+                "$(Agent.TempDirectory)/terraform/terraform" version
+
+          - task: Bash@3
+            displayName: Configure Git auth for Terraform module downloads
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                if [ -z "${SYSTEM_ACCESSTOKEN:-}" ]; then
+                  echo "System.AccessToken is not available" >&2
+                  exit 1
+                fi
+
+                git config --global http.https://dev.azure.com/CCOE-Azure/.extraheader "AUTHORIZATION: bearer ${SYSTEM_ACCESSTOKEN}"
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - task: Bash@3
+            displayName: Terraform init without backend
+            condition: ne(variables['TF_BACKEND_READY'], 'true')
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                terraform init -input=false -no-color -backend=false
+
+          - task: AzureCLI@2
+            displayName: Terraform init with backend
+            condition: eq(variables['TF_BACKEND_READY'], 'true')
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+                terraform init -input=false -no-color -reconfigure
+
+          - task: AzureCLI@2
+            displayName: Terraform root harness test
+            condition: eq(variables['TF_BACKEND_READY'], 'true')
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+                terraform test -filter=tests/root-plan.tftest.hcl -no-color
+
+          - task: AzureCLI@2
+            displayName: Terraform plan
+            condition: eq(variables['TF_BACKEND_READY'], 'true')
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+                terraform plan -input=false -no-color
+
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+  - stage: CreateGitTag
+    displayName: Create Git Tag
+    dependsOn: Plan
+    condition: and(succeeded('Plan'), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - job: create_git_tag
+        displayName: Create Git Tag
+        steps:
+          - checkout: self
+            clean: true
+            persistCredentials: true
+            fetchDepth: 0
+
+          - task: Bash@3
+            displayName: Create annotated semantic version tag
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+
+                source_sha="$(Build.SourceVersion)"
+
+                git fetch --force --tags
+
+                latest_tag="$(git tag --list 'v[1-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1p')"
+                if [[ -z "${latest_tag}" ]]; then
+                  latest_tag="v1.0.0"
+                  previous_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1p')"
+                  if [[ -n "${previous_tag}" ]]; then
+                    commit_range="${previous_tag}..${source_sha}"
+                  else
+                    commit_range="${source_sha}"
+                  fi
+                else
+                  commit_range="${latest_tag}..${source_sha}"
+                fi
+
+                commits="$(git log --format=%B ${commit_range})"
+                release_notes="$(git log --format='- %s (%h)' ${commit_range} | sed -n '1,20p')"
+                if [[ -z "${release_notes}" ]]; then
+                  release_notes="- ${source_sha}"
+                fi
+
+                if grep -Eq '(^|[[:space:]])BREAKING[ -]CHANGE:|^[a-zA-Z][a-zA-Z0-9-]*(\([^)]+\))?!:' <<< "${commits}"; then
+                  bump="major"
+                elif grep -Eq '^feat(\([^)]+\))?:' <<< "${commits}"; then
+                  bump="minor"
+                elif grep -Eq '^fix(\([^)]+\))?:' <<< "${commits}"; then
+                  bump="patch"
+                else
+                  echo "No semantic-release prefix found; defaulting to patch bump."
+                  bump="patch"
+                fi
+
+                version="${latest_tag#v}"
+                IFS='.' read -r major minor patch <<< "${version}"
+
+                case "${bump}" in
+                  major)
+                    major=$((major + 1))
+                    minor=0
+                    patch=0
+                    ;;
+                  minor)
+                    minor=$((minor + 1))
+                    patch=0
+                    ;;
+                  patch)
+                    patch=$((patch + 1))
+                    ;;
+                esac
+
+                tag_name="v${major}.${minor}.${patch}"
+
+                if git rev-parse -q --verify "refs/tags/${tag_name}" >/dev/null; then
+                  echo "Tag ${tag_name} already exists; leaving it unchanged."
+                  exit 0
+                fi
+
+                if git ls-remote --exit-code --tags origin "refs/tags/${tag_name}" >/dev/null 2>&1; then
+                  echo "Remote already has tag ${tag_name}; leaving it unchanged."
+                  exit 0
+                fi
+
+                git config user.name "Azure Pipelines"
+                git config user.email "azure-pipelines@local"
+
+                tag_message="$(mktemp)"
+                {
+                  echo "Release ${tag_name} (${bump})"
+                  echo
+                  echo "Range: ${commit_range}"
+                  echo
+                  echo "Changes:"
+                  printf '%s\n' "${release_notes}"
+                } > "${tag_message}"
+
+                git tag -a "${tag_name}" "${source_sha}" -F "${tag_message}"
+                git push origin "refs/tags/${tag_name}"
+
+  - stage: Apply
+    displayName: Apply
+    dependsOn:
+      - Plan
+      - CreateGitTag
+    condition: false
+    jobs:
+      - job: terraform_apply
+        displayName: Terraform Apply
+        steps:
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+
+          - task: Bash@3
+            displayName: Install Terraform
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                curl -fsSL "https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip" -o terraform.zip
+                unzip -o terraform.zip -d "$(Agent.TempDirectory)/terraform"
+                echo "##vso[task.prependpath]$(Agent.TempDirectory)/terraform"
+                "$(Agent.TempDirectory)/terraform/terraform" version
+
+          - task: Bash@3
+            displayName: Configure Git auth for Terraform module downloads
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                if [ -z "${SYSTEM_ACCESSTOKEN:-}" ]; then
+                  echo "System.AccessToken is not available" >&2
+                  exit 1
+                fi
+
+                git config --global http.https://dev.azure.com/CCOE-Azure/.extraheader "AUTHORIZATION: bearer ${SYSTEM_ACCESSTOKEN}"
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - task: AzureCLI@2
+            displayName: Terraform init
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+                terraform init -input=false -no-color -reconfigure
+
+          - task: AzureCLI@2
+            displayName: Terraform apply
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              addSpnToEnvironment: true
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+                terraform apply -auto-approve -input=false -no-color
+
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
