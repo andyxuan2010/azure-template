@@ -1,0 +1,451 @@
+name: $(Build.Repository.Name)
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - main
+
+pr: none
+
+pool:
+  name: 'Azure Pipelines'
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - name: terraformVersion
+    value: '1.10.5'
+  - name: selfRepoRoot
+    value: '$(Pipeline.Workspace)/s/template'
+
+stages:
+  - stage: Validate
+    displayName: Common Validation
+    jobs:
+      - job: terraform_validate
+        displayName: Terraform Validate
+        steps:
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+            path: s/template
+
+          - task: Bash@3
+            displayName: Install Terraform
+            inputs:
+              targetType: filePath
+              filePath: $(selfRepoRoot)/scripts/azure-pipelines/install-terraform.sh
+              arguments: $(terraformVersion)
+              workingDirectory: $(selfRepoRoot)
+
+          - task: Bash@3
+            displayName: Terraform fmt and validate
+            inputs:
+              targetType: filePath
+              filePath: $(selfRepoRoot)/scripts/azure-pipelines/terraform-validate.sh
+              workingDirectory: $(selfRepoRoot)
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+  - stage: Plan
+    displayName: Terraform Plan
+    dependsOn: Validate
+    condition: succeeded()
+    variables:
+      azureSubscription: 'sc-platform-dev'
+      terraformVarFile: 'terraform.tfvars'
+      backendSubscriptionId: '1ec5edd4-5654-4246-8027-b29ef63b3393'
+      backendTenantId: 'd5b038fb-4b39-41cc-8a10-fba75212180b'
+      backendResourceGroupName: 'rg-platform-dev'
+      backendStorageAccountName: 'stplatformeusdev'
+      backendContainerName: 'terraform'
+      backendKey: 'template/terraform.tfstate'
+      planArtifactName: 'terraform-plan'
+      planTextArtifactName: 'terraform-plan-text'
+      planFilePath: '$(Build.ArtifactStagingDirectory)/plan/terraform.tfplan'
+      planTextPath: '$(Build.ArtifactStagingDirectory)/plan/terraform-plan.txt'
+    jobs:
+      - job: terraform_plan
+        displayName: Terraform Plan
+        steps:
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+            path: s/template
+
+          - task: Bash@3
+            displayName: Install Terraform
+            inputs:
+              targetType: filePath
+              filePath: $(selfRepoRoot)/scripts/azure-pipelines/install-terraform.sh
+              arguments: $(terraformVersion)
+              workingDirectory: $(selfRepoRoot)
+
+          - task: AzureCLI@2
+            displayName: Terraform plan
+            inputs:
+              azureSubscription: 'sc-platform-dev'
+              scriptType: bash
+              scriptLocation: scriptPath
+              scriptPath: $(selfRepoRoot)/scripts/azure-pipelines/terraform-plan.sh
+              arguments: >-
+                "$(backendSubscriptionId)"
+                "$(backendTenantId)"
+                "$(backendResourceGroupName)"
+                "$(backendStorageAccountName)"
+                "$(backendContainerName)"
+                "$(backendKey)"
+                "$(terraformVarFile)"
+                "$(planFilePath)"
+                "$(planTextPath)"
+              workingDirectory: $(selfRepoRoot)
+              addSpnToEnvironment: true
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish plan artifact
+            inputs:
+              targetPath: $(planFilePath)
+              artifact: $(planArtifactName)
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish plan text
+            inputs:
+              targetPath: $(planTextPath)
+              artifact: $(planTextArtifactName)
+
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+  - stage: ValidateModules
+    displayName: Validate Module Harness
+    dependsOn: Plan
+    condition: succeeded()
+    variables:
+      azureSubscription: 'sc-platform-dev'
+      backendSubscriptionId: '1ec5edd4-5654-4246-8027-b29ef63b3393'
+      backendTenantId: 'd5b038fb-4b39-41cc-8a10-fba75212180b'
+      backendResourceGroupName: 'rg-platform-dev'
+      backendStorageAccountName: 'stplatformeusdev'
+      backendContainerName: 'terraform'
+      backendKey: 'template/terraform.tfstate'
+    jobs:
+      - job: validate_modules
+        displayName: Validate Module Harness
+        strategy:
+          maxParallel: 4
+          matrix:
+            acr:
+              moduleName: acr
+            adf:
+              moduleName: adf
+            aks:
+              moduleName: aks
+            appregistration:
+              moduleName: appregistration
+            appservice:
+              moduleName: appservice
+            appserviceplan:
+              moduleName: appserviceplan
+            applicationgateway:
+              moduleName: applicationgateway
+            automationaccount:
+              moduleName: automationaccount
+            azure_ai_service:
+              moduleName: azure_ai_service
+            databricks:
+              moduleName: databricks
+            eventhub:
+              moduleName: eventhub
+            firewall:
+              moduleName: firewall
+            functionapp:
+              moduleName: functionapp
+            keyvault:
+              moduleName: keyvault
+            linuxvm:
+              moduleName: linuxvm
+            loganalytics:
+              moduleName: loganalytics
+            logicapp:
+              moduleName: logicapp
+            managedidentity:
+              moduleName: managedidentity
+            managementgroups:
+              moduleName: managementgroups
+            nsg:
+              moduleName: nsg
+            openai:
+              moduleName: openai
+            policy:
+              moduleName: policy
+            private_dns:
+              moduleName: private_dns
+            rg:
+              moduleName: rg
+            roleassignments:
+              moduleName: roleassignments
+            route_table:
+              moduleName: route_table
+            servicebus:
+              moduleName: servicebus
+            sqldb:
+              moduleName: sqldb
+            sqlmi:
+              moduleName: sqlmi
+            sqlmi_db:
+              moduleName: sqlmi_db
+            storageaccount:
+              moduleName: storageaccount
+            subscription_vending:
+              moduleName: subscription_vending
+            vnet:
+              moduleName: vnet
+            winvm:
+              moduleName: winvm
+        steps:
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+            path: s/template
+
+          - task: Bash@3
+            displayName: Install Terraform
+            inputs:
+              targetType: filePath
+              filePath: $(selfRepoRoot)/scripts/azure-pipelines/install-terraform.sh
+              arguments: $(terraformVersion)
+              workingDirectory: $(selfRepoRoot)
+
+          - task: Bash@3
+            displayName: Build module harness overrides
+            inputs:
+              targetType: inline
+              workingDirectory: $(selfRepoRoot)
+              script: |
+                set -euo pipefail
+
+                modules=(
+                  acr adf aks appregistration appservice appserviceplan applicationgateway automationaccount
+                  azure_ai_service databricks eventhub firewall functionapp keyvault
+                  linuxvm loganalytics logicapp managedidentity managementgroups nsg
+                  openai policy private_dns rg roleassignments route_table servicebus
+                  sqldb sqlmi sqlmi_db storageaccount subscription_vending vnet winvm
+                )
+
+                enabled_modules=("$(moduleName)")
+                case "$(moduleName)" in
+                  appservice)
+                    enabled_modules+=(appserviceplan)
+                    ;;
+                  functionapp|logicapp)
+                    enabled_modules+=(appserviceplan storageaccount)
+                    ;;
+                  sqlmi)
+                    enabled_modules+=(vnet)
+                    ;;
+                  sqlmi_db)
+                    enabled_modules+=(sqlmi vnet)
+                    ;;
+                esac
+
+                output_file="$(Agent.TempDirectory)/module-plan.tfvars.json"
+
+                {
+                  echo "{"
+                  echo '  "module_plan_enabled": {'
+
+                  for i in "${!modules[@]}"; do
+                    module_name="${modules[$i]}"
+                    enabled=false
+
+                    for enabled_module in "${enabled_modules[@]}"; do
+                      if [[ "${module_name}" == "${enabled_module}" ]]; then
+                        enabled=true
+                        break
+                      fi
+                    done
+
+                    suffix=","
+                    if [[ "${i}" -eq $((${#modules[@]} - 1)) ]]; then
+                      suffix=""
+                    fi
+
+                    echo "    \"${module_name}\": ${enabled}${suffix}"
+                  done
+
+                  echo "  }"
+                  echo "}"
+                } > "${output_file}"
+
+                echo "Generated overrides for module $(moduleName):"
+                cat "${output_file}"
+
+          - task: AzureCLI@2
+            displayName: Terraform plan selected module harness
+            inputs:
+              azureSubscription: 'sc-platform-dev'
+              scriptType: bash
+              scriptLocation: inlineScript
+              workingDirectory: $(selfRepoRoot)
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+
+                terraform init \
+                  -reconfigure \
+                  -input=false \
+                  -no-color \
+                  -backend-config="subscription_id=$(backendSubscriptionId)" \
+                  -backend-config="tenant_id=$(backendTenantId)" \
+                  -backend-config="resource_group_name=$(backendResourceGroupName)" \
+                  -backend-config="storage_account_name=$(backendStorageAccountName)" \
+                  -backend-config="container_name=$(backendContainerName)" \
+                  -backend-config="key=$(backendKey)"
+
+                terraform plan -input=false -no-color -lock=false -var-file="$(Agent.TempDirectory)/module-plan.tfvars.json"
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+  - stage: CreateGitTag
+    displayName: Create Git Tag
+    dependsOn:
+      - Plan
+      - ValidateModules
+    condition: and(succeeded('Plan'), succeeded('ValidateModules'), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - job: create_git_tag
+        displayName: Create Git Tag
+        steps:
+          - checkout: self
+            clean: true
+            persistCredentials: true
+            fetchDepth: 0
+
+          - task: Bash@3
+            displayName: Create annotated semantic version tag
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+
+                source_sha="$(Build.SourceVersion)"
+
+                git fetch --force --tags
+
+                latest_tag="$(git tag --list 'v[1-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1p')"
+                if [[ -z "${latest_tag}" ]]; then
+                  latest_tag="v1.0.0"
+                  previous_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1p')"
+                  if [[ -n "${previous_tag}" ]]; then
+                    commit_range="${previous_tag}..${source_sha}"
+                  else
+                    commit_range="${source_sha}"
+                  fi
+                else
+                  commit_range="${latest_tag}..${source_sha}"
+                fi
+
+                commits="$(git log --format=%B ${commit_range})"
+                release_notes="$(git log --format='- %s (%h)' ${commit_range} | sed -n '1,20p')"
+                if [[ -z "${release_notes}" ]]; then
+                  release_notes="- ${source_sha}"
+                fi
+
+                if grep -Eq '(^|[[:space:]])BREAKING[ -]CHANGE:|^[a-zA-Z][a-zA-Z0-9-]*(\([^)]+\))?!:' <<< "${commits}"; then
+                  bump="major"
+                elif grep -Eq '^feat(\([^)]+\))?:' <<< "${commits}"; then
+                  bump="minor"
+                elif grep -Eq '^fix(\([^)]+\))?:' <<< "${commits}"; then
+                  bump="patch"
+                else
+                  echo "No semantic-release prefix found; defaulting to patch bump."
+                  bump="patch"
+                fi
+
+                version="${latest_tag#v}"
+                IFS='.' read -r major minor patch <<< "${version}"
+
+                case "${bump}" in
+                  major)
+                    major=$((major + 1))
+                    minor=0
+                    patch=0
+                    ;;
+                  minor)
+                    minor=$((minor + 1))
+                    patch=0
+                    ;;
+                  patch)
+                    patch=$((patch + 1))
+                    ;;
+                esac
+
+                tag_name="v${major}.${minor}.${patch}"
+
+                if git rev-parse -q --verify "refs/tags/${tag_name}" >/dev/null; then
+                  echo "Tag ${tag_name} already exists; leaving it unchanged."
+                  exit 0
+                fi
+
+                if git ls-remote --exit-code --tags origin "refs/tags/${tag_name}" >/dev/null 2>&1; then
+                  echo "Remote already has tag ${tag_name}; leaving it unchanged."
+                  exit 0
+                fi
+
+                git config user.name "Azure Pipelines"
+                git config user.email "azure-pipelines@local"
+
+                tag_message="$(mktemp)"
+                {
+                  echo "Release ${tag_name} (${bump})"
+                  echo
+                  echo "Range: ${commit_range}"
+                  echo
+                  echo "Changes:"
+                  printf '%s\n' "${release_notes}"
+                } > "${tag_message}"
+
+                git tag -a "${tag_name}" "${source_sha}" -F "${tag_message}"
+                git push origin "refs/tags/${tag_name}"
