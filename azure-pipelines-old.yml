@@ -1,0 +1,174 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+name: $(Build.Repository.Name)-pipeline
+
+trigger:
+  branches:
+    include:
+      - main
+pool:
+  name: 'IaCRunner'
+  demands:
+  - Agent.OS -equals Linux
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: CCoE-Infra-IaC/template
+      ref: refs/heads/main
+
+
+variables:
+  - name: env
+    ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
+      value: 'prod'
+    ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
+      value: 'dev'
+    ${{ if eq(variables['Build.SourceBranchName'], 'sbx') }}:
+      value: 'sbx'
+  - name: subscription
+    ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
+      value: 'prod'
+    ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
+      value: 'nonprod'
+    ${{ if eq(variables['Build.SourceBranchName'], 'sbx') }}:
+      value: 'sbx'
+  - name: keyVaultName
+    value: 'kvplatformeusdev'
+  - name: targetPatSecretName
+    value: 'AZURE-DEVOPS-SYNC-PAT'
+  - name: targetOrganizationSecretName
+    value: 'AZURE-DEVOPS-SYNC-ORGANIZATION'
+  - name: targetProjectSecretName
+    value: 'AZURE-DEVOPS-SYNC-PROJECT'
+
+stages:
+  - stage: ValidatePlan
+    displayName: Validate and Plan
+    jobs:
+      - job: terraform_plan
+        displayName: Terraform Plan
+        steps:
+          - template: templates/shared-runner-hygiene.yml@templates
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+
+          - bash: |
+              set -eu
+              if [ -z "${SYSTEM_ACCESSTOKEN:-}" ]; then
+                echo "System.AccessToken is not available" >&2
+                exit 1
+              fi
+
+              git config --global http.https://dev.azure.com/Bombardier-Enterprise/.extraheader "AUTHORIZATION: bearer ${SYSTEM_ACCESSTOKEN}"
+            displayName: Configure Git auth for Terraform module downloads
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: 'latest'
+
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Init"
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              commandOptions: '-input=false -no-color'
+              backendServiceArm: 'sc-ccoe-iac-devops-${{variables.subscription}}'
+              backendAzureRmResourceGroupName: 'rg-ccoe-iac-cc-${{variables.subscription}}'
+              backendAzureRmStorageAccountName: 'stccoeiaccc${{variables.subscription}}'
+              backendAzureRmContainerName: 'terraform'
+              backendAzureRmKey: '$(Build.Repository.Name)/terraform.tfstate'
+
+          - bash: |
+              set -euo pipefail
+              terraform fmt -check -recursive
+            displayName: "Terraform fmt check"
+
+          - task: TerraformTaskV4@4
+            displayName: "Terraform validate"
+            inputs:
+              provider: 'azurerm'
+              command: 'validate'
+
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Plan"
+            inputs:
+              provider: 'azurerm'
+              command: 'plan'
+              commandOptions: '-input=false -no-color'
+              environmentServiceNameAzureRM: 'sc-ccoe-iac-devops-${{variables.subscription}}'
+
+          - template: templates/shared-runner-hygiene.yml@templates
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+  - stage: Apply
+    displayName: Apply
+    dependsOn: ValidatePlan
+    condition: and(succeeded(), eq(variables['Build.SourceBranchName'], 'master'))
+    jobs:
+      - job: terraform_apply
+        displayName: Terraform Apply
+        steps:
+          - template: templates/shared-runner-hygiene.yml@templates
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+
+          - bash: |
+              set -eu
+              if [ -z "${SYSTEM_ACCESSTOKEN:-}" ]; then
+                echo "System.AccessToken is not available" >&2
+                exit 1
+              fi
+
+              git config --global http.https://dev.azure.com/Bombardier-Enterprise/.extraheader "AUTHORIZATION: bearer ${SYSTEM_ACCESSTOKEN}"
+            displayName: Configure Git auth for Terraform module downloads
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: 'latest'
+
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Init"
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              commandOptions: '-input=false -no-color'
+              backendServiceArm: 'sc-ccoe-iac-devops-${{variables.subscription}}'
+              backendAzureRmResourceGroupName: 'rg-ccoe-iac-cc-${{variables.subscription}}'
+              backendAzureRmStorageAccountName: 'stccoeiaccc${{variables.subscription}}'
+              backendAzureRmContainerName: 'terraform'
+              backendAzureRmKey: '$(Build.Repository.Name)/terraform.tfstate'
+
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Apply"
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              commandOptions: '-auto-approve -input=false -no-color'
+              environmentServiceNameAzureRM: 'sc-ccoe-iac-devops-${{variables.subscription}}'
+
+          - template: templates/shared-runner-hygiene.yml@templates
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false

@@ -1,0 +1,150 @@
+location            = "canadacentral"
+workload            = "platform"
+environment         = "dev"
+resource_group_name = "rg-platform-dev"
+hub_vnet_name       = "vnet-hub-platform-dev"
+spoke_vnet_name     = "vnet-spoke-platform-dev"
+nsg_name            = "nsg-platform-dev-spoke"
+
+# Governance modules are optional because they require broader tenant or billing permissions.
+enable_management_group                     = false
+management_group_name                       = "mg-platform-dev"
+management_group_display_name               = "Platform Dev"
+management_group_parent_management_group_id = ""
+management_group_children = {
+  platform = {
+    display_name = "Platform"
+  }
+  connectivity = {
+    display_name = "Connectivity"
+  }
+  identity = {
+    display_name = "Identity"
+  }
+  landingzones = {
+    display_name = "Landing Zones"
+  }
+  sandboxes = {
+    display_name = "Sandboxes"
+  }
+}
+
+enable_subscription_bootstrap                = false
+subscription_alias_enabled                   = false
+subscription_alias_name                      = ""
+subscription_name                            = "platform-landingzone-dev"
+billing_scope_id                             = ""
+existing_subscription_id                     = "/subscriptions/<subscription-id>"
+subscription_management_group_id             = "/providers/Microsoft.Management/managementGroups/<management-group-id>"
+subscription_resource_provider_registrations = [
+  "Microsoft.Network",
+  "Microsoft.KeyVault",
+  "Microsoft.Storage",
+  "Microsoft.Web",
+  "Microsoft.Insights",
+  "Microsoft.DataFactory",
+  "Microsoft.Databricks"
+]
+hierarchy_subscriptions = {
+  platform = {
+    subscription_name        = "platform-shared-dev"
+    existing_subscription_id = "/subscriptions/00000000-0000-0000-0000-000000000010"
+  }
+  connectivity = {
+    subscription_name        = "platform-connectivity-dev"
+    existing_subscription_id = "/subscriptions/00000000-0000-0000-0000-000000000011"
+  }
+  identity = {
+    subscription_name        = "platform-identity-dev"
+    existing_subscription_id = "/subscriptions/00000000-0000-0000-0000-000000000012"
+  }
+  landingzones = {
+    subscription_name        = "landingzones-dev"
+    existing_subscription_id = "/subscriptions/00000000-0000-0000-0000-000000000013"
+  }
+  sandboxes = {
+    subscription_name        = "sandboxes-dev"
+    existing_subscription_id = "/subscriptions/00000000-0000-0000-0000-000000000014"
+  }
+}
+
+# Leave these empty to let the modules auto-generate compliant names.
+managed_identity_name = ""
+storage_account_name  = ""
+key_vault_name        = ""
+log_analytics_name    = ""
+firewall_name         = ""
+route_table_name      = ""
+adf_name              = ""
+
+hub_address_space                  = ["10.42.0.0/24"]
+spoke_address_space                = ["10.42.1.0/22"]
+firewall_subnet_prefixes           = ["10.42.0.0/24"]
+app_subnet_prefixes                = ["10.42.1.0/24"]
+private_endpoint_subnet_prefixes   = ["10.42.2.0/24"]
+databricks_public_subnet_prefixes  = ["10.42.3.0/24"]
+databricks_private_subnet_prefixes = ["10.42.4.0/24"]
+aks_subnet_prefixes                = ["10.42.5.0/24"]
+jumpbox_subnet_prefixes            = ["10.42.6.0/24"]
+sqlmi_subnet_prefixes              = ["10.42.7.0/24"]
+
+private_dns_zone_names = [
+  "privatelink.blob.core.windows.net",
+  "privatelink.vaultcore.azure.net",
+  "privatelink.azurewebsites.net",
+  "privatelink.servicebus.windows.net",
+  "privatelink.cognitiveservices.azure.com",
+  "privatelink.datafactory.azure.net",
+  "privatelink.database.windows.net"
+]
+
+firewall_sku_tier                                = "Standard"
+log_analytics_retention_in_days                  = 30
+log_analytics_internet_ingestion_enabled         = true
+log_analytics_internet_query_enabled             = true
+log_analytics_local_authentication_disabled      = false
+log_analytics_reservation_capacity_in_gb_per_day = null
+
+# Prefer Entra object IDs when display names are not unique.
+app_admin_group = []
+app_user_group  = []
+jumpbox_public_network_enabled = true
+# Common jumpbox choices:
+# Windows Server 2022 Datacenter:
+# jumpbox_windows_image_publisher = "MicrosoftWindowsServer"
+# jumpbox_windows_image_offer     = "WindowsServer"
+# jumpbox_windows_image_sku       = "2022-Datacenter"
+# Windows Server 2022 Azure Edition:
+# jumpbox_windows_image_publisher = "MicrosoftWindowsServer"
+# jumpbox_windows_image_offer     = "WindowsServer"
+# jumpbox_windows_image_sku       = "2022-datacenter-azure-edition"
+# Azure Virtual Desktop example:
+# jumpbox_windows_image_publisher = "MicrosoftWindowsDesktop"
+# jumpbox_windows_image_offer     = "windows-11"
+# jumpbox_windows_image_sku       = "win11-23h2-avd"
+# Make sure jumpbox_windows_image_publisher, jumpbox_windows_image_offer, jumpbox_windows_image_sku, and jumpbox_windows_image_version match the same image family.
+jumpbox_windows_image_publisher = "MicrosoftWindowsServer"
+jumpbox_windows_image_offer     = "WindowsServer"
+jumpbox_windows_image_sku       = "2022-Datacenter"
+jumpbox_windows_image_version   = "latest"
+
+# Example SQL administrator values for planning. Replace before apply.
+sql_admin_username     = "sqladminuser"
+sql_admin_password     = "ChangeMeSql12345!"
+sql_ad_admin_login     = "sql-admin-group"
+sql_ad_admin_object_id = "00000000-0000-0000-0000-000000000000"
+sqlmi_admin_username   = "sqlmiadminuser"
+sqlmi_admin_password   = "ChangeMeSqlMi12345!"
+allowed_policy_locations = [
+  "canadacentral",
+  "canadaeast"
+]
+
+# Optional platform RBAC assignments.
+platform_role_assignments = {}
+
+tags = {
+  ManagedBy = "Terraform"
+  Pattern   = "platform-landing-zone"
+  Owner     = "CCOE"
+}
