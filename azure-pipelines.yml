@@ -1,0 +1,375 @@
+name: $(Build.Repository.Name)
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - main
+
+pr: none
+
+pool:
+  name: 'Azure Pipelines'
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - name: selfRepoRoot
+    value: '$(Pipeline.Workspace)/s/template'
+  # Define AZURE_SERVICE_CONNECTION, TERRAFORM_VERSION, TERRAFORM_VAR_FILE, and
+  # TERRAFORM_BACKEND_FILE in Azure DevOps pipeline variables or a variable group.
+
+stages:
+  - stage: Validate
+    displayName: Common Validation
+    jobs:
+      - job: terraform_validate
+        displayName: Terraform Validate
+        steps:
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+            path: s/template
+
+          - task: Bash@3
+            displayName: Install Terraform
+            inputs:
+              targetType: filePath
+              filePath: $(selfRepoRoot)/scripts/azure-pipelines/install-terraform.sh
+              arguments: $(TERRAFORM_VERSION)
+              workingDirectory: $(selfRepoRoot)
+
+          - task: Bash@3
+            displayName: Terraform fmt and validate
+            inputs:
+              targetType: filePath
+              filePath: $(selfRepoRoot)/scripts/azure-pipelines/terraform-validate.sh
+              workingDirectory: $(selfRepoRoot)
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+  - stage: Plan
+    displayName: Terraform Plan
+    dependsOn: Validate
+    condition: succeeded()
+    variables:
+      planArtifactName: 'terraform-plan'
+      planTextArtifactName: 'terraform-plan-text'
+      planFilePath: '$(Build.ArtifactStagingDirectory)/plan/terraform.tfplan'
+      planTextPath: '$(Build.ArtifactStagingDirectory)/plan/terraform-plan.txt'
+    jobs:
+      - job: terraform_plan
+        displayName: Terraform Plan
+        steps:
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+            path: s/template
+
+          - task: Bash@3
+            displayName: Install Terraform
+            inputs:
+              targetType: filePath
+              filePath: $(selfRepoRoot)/scripts/azure-pipelines/install-terraform.sh
+              arguments: $(TERRAFORM_VERSION)
+              workingDirectory: $(selfRepoRoot)
+
+          - task: Bash@3
+            displayName: Read Terraform backend config
+            inputs:
+              targetType: filePath
+              filePath: $(selfRepoRoot)/scripts/azure-pipelines/read-backend-config.sh
+              arguments: $(TERRAFORM_BACKEND_FILE)
+              workingDirectory: $(selfRepoRoot)
+
+          - task: AzureCLI@2
+            displayName: Terraform plan
+            inputs:
+              azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+              scriptType: bash
+              scriptLocation: scriptPath
+              scriptPath: $(selfRepoRoot)/scripts/azure-pipelines/terraform-plan.sh
+              arguments: >-
+                "$(backendSubscriptionId)"
+                "$(backendTenantId)"
+                "$(backendResourceGroupName)"
+                "$(backendStorageAccountName)"
+                "$(backendContainerName)"
+                "$(backendKey)"
+                "$(TERRAFORM_VAR_FILE)"
+                "$(planFilePath)"
+                "$(planTextPath)"
+              workingDirectory: $(selfRepoRoot)
+              addSpnToEnvironment: true
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish plan artifact
+            inputs:
+              targetPath: $(planFilePath)
+              artifact: $(planArtifactName)
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish plan text
+            inputs:
+              targetPath: $(planTextPath)
+              artifact: $(planTextArtifactName)
+
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+  - stage: DetectModuleTargets
+    displayName: Detect Module Harness Targets
+    dependsOn: Validate
+    condition: succeeded()
+    jobs:
+      - job: detect_module_targets
+        displayName: Detect Module Harness Targets
+        steps:
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+            fetchDepth: 0
+            path: s/template
+
+          - task: Bash@3
+            displayName: Detect changed module harness targets
+            name: set_module_targets
+            inputs:
+              targetType: inline
+              workingDirectory: $(selfRepoRoot)
+              script: |
+                set -euo pipefail
+
+                changed_files_file="$(Agent.TempDirectory)/ado-build-changed-files.txt"
+
+                if ! python <<'PY' > "${changed_files_file}"; then
+                import json
+                import os
+                import sys
+                import urllib.error
+                import urllib.parse
+                import urllib.request
+
+                token = os.environ.get("SYSTEM_ACCESSTOKEN", "")
+                if not token:
+                    print("SYSTEM_ACCESSTOKEN is not available for Azure DevOps change detection.", file=sys.stderr)
+                    sys.exit(1)
+
+                collection_uri = os.environ["SYSTEM_COLLECTIONURI"].rstrip("/")
+                project = urllib.parse.quote(os.environ["SYSTEM_TEAMPROJECT"], safe="")
+                repository_id = urllib.parse.quote(os.environ["BUILD_REPOSITORY_ID"], safe="")
+                build_id = os.environ["BUILD_BUILDID"]
+
+                def get_json(url: str):
+                    request = urllib.request.Request(
+                        url,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Accept": "application/json",
+                        },
+                    )
+                    with urllib.request.urlopen(request) as response:
+                        payload = json.load(response)
+                        continuation = response.headers.get("x-ms-continuationtoken", "")
+                    return payload, continuation
+
+                change_ids = []
+                continuation = ""
+                while True:
+                    url = (
+                        f"{collection_uri}/{project}/_apis/build/builds/{build_id}/changes"
+                        f"?api-version=7.1&includeSourceChange=true&$top=100"
+                    )
+                    if continuation:
+                        url += f"&continuationToken={urllib.parse.quote(continuation, safe='')}"
+                    payload, continuation = get_json(url)
+                    for change in payload.get("value", []):
+                        change_id = change.get("id")
+                        if change_id:
+                            change_ids.append(change_id)
+                    if not continuation:
+                        break
+
+                changed_paths = set()
+                for change_id in change_ids:
+                    continuation = ""
+                    while True:
+                        url = (
+                            f"{collection_uri}/{project}/_apis/git/repositories/{repository_id}/commits/{change_id}/changes"
+                            f"?api-version=7.1&top=100"
+                        )
+                        if continuation:
+                            url += f"&skip={urllib.parse.quote(continuation, safe='')}"
+                        payload, continuation = get_json(url)
+                        for change in payload.get("changes", []):
+                            item = change.get("item") or {}
+                            path = item.get("path") or ""
+                            if path.startswith("/"):
+                                path = path[1:]
+                            if path:
+                                changed_paths.add(path)
+                        if not continuation:
+                            break
+
+                for path in sorted(changed_paths):
+                    print(path)
+                PY
+                  echo "Azure DevOps build change API lookup failed; falling back to git diff."
+                  : > "${changed_files_file}"
+                fi
+
+                if [[ ! -s "${changed_files_file}" ]]; then
+                  echo "Azure DevOps build change API returned no files; falling back to git diff."
+                  head_ref="$(Build.SourceVersion)"
+                  if git rev-parse --verify "${head_ref}^" >/dev/null 2>&1; then
+                    base_ref="${head_ref}^"
+                  else
+                    base_ref=""
+                  fi
+                  module_matrix="$(bash scripts/azure-pipelines/module-harness-targets.sh detect --base "${base_ref}" --head "${head_ref}" --format ado-matrix)"
+                  module_list_json="$(bash scripts/azure-pipelines/module-harness-targets.sh detect --base "${base_ref}" --head "${head_ref}" --format json-array)"
+                else
+                  echo "Changed files reported by Azure DevOps build change API:"
+                  cat "${changed_files_file}"
+                  module_matrix="$(bash scripts/azure-pipelines/module-harness-targets.sh detect-files --input "${changed_files_file}" --format ado-matrix)"
+                  module_list_json="$(bash scripts/azure-pipelines/module-harness-targets.sh detect-files --input "${changed_files_file}" --format json-array)"
+                fi
+
+                if [[ "${module_list_json}" == "[]" ]]; then
+                  has_modules="false"
+                else
+                  has_modules="true"
+                fi
+
+                echo "Selected module harness targets: ${module_list_json}"
+                echo "##vso[task.setvariable variable=moduleMatrix;isOutput=true]${module_matrix}"
+                echo "##vso[task.setvariable variable=moduleList;isOutput=true]${module_list_json}"
+                echo "##vso[task.setvariable variable=hasModules;isOutput=true]${has_modules}"
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false
+
+  - stage: ValidateModules
+    displayName: Validate Module Harness
+    dependsOn:
+      - Plan
+      - DetectModuleTargets
+    condition: and(succeeded(), eq(dependencies.DetectModuleTargets.outputs['detect_module_targets.set_module_targets.hasModules'], 'true'))
+    jobs:
+      - job: validate_modules
+        displayName: Validate Module Harness
+        strategy:
+          # Keep the matrix aligned with GitHub Actions.
+          # Actual Azure DevOps concurrency is capped by the organization's parallel-job entitlement.
+          maxParallel: 4
+          matrix: $[ stageDependencies.DetectModuleTargets.detect_module_targets.outputs['set_module_targets.moduleMatrix'] ]
+        steps:
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              configureTerraformCache: true
+              runPostJobCleanup: false
+
+          - checkout: self
+            clean: true
+            persistCredentials: false
+            path: s/template
+
+          - task: Bash@3
+            displayName: Install Terraform
+            inputs:
+              targetType: filePath
+              filePath: $(selfRepoRoot)/scripts/azure-pipelines/install-terraform.sh
+              arguments: $(TERRAFORM_VERSION)
+              workingDirectory: $(selfRepoRoot)
+
+          - task: Bash@3
+            displayName: Read Terraform backend config
+            inputs:
+              targetType: filePath
+              filePath: $(selfRepoRoot)/scripts/azure-pipelines/read-backend-config.sh
+              arguments: $(TERRAFORM_BACKEND_FILE)
+              workingDirectory: $(selfRepoRoot)
+
+          - task: Bash@3
+            displayName: Build module harness overrides
+            inputs:
+              targetType: inline
+              workingDirectory: $(selfRepoRoot)
+              script: |
+                set -euo pipefail
+                output_file="$(Agent.TempDirectory)/module-plan.tfvars.json"
+                bash scripts/azure-pipelines/module-harness-targets.sh overrides --module "$(moduleName)" --output "${output_file}"
+                echo "Generated overrides for module $(moduleName):"
+                cat "${output_file}"
+
+          - task: AzureCLI@2
+            displayName: Terraform plan selected module harness
+            inputs:
+              azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+              scriptType: bash
+              scriptLocation: inlineScript
+              workingDirectory: $(selfRepoRoot)
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                fi
+                if [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                fi
+
+                terraform init \
+                  -reconfigure \
+                  -input=false \
+                  -no-color \
+                  -backend-config="subscription_id=$(backendSubscriptionId)" \
+                  -backend-config="tenant_id=$(backendTenantId)" \
+                  -backend-config="resource_group_name=$(backendResourceGroupName)" \
+                  -backend-config="storage_account_name=$(backendStorageAccountName)" \
+                  -backend-config="container_name=$(backendContainerName)" \
+                  -backend-config="key=$(backendKey)"
+
+                terraform plan -input=false -no-color -lock=false -var-file="$(Agent.TempDirectory)/module-plan.tfvars.json"
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+          - template: templates/shared-runner-hygiene.yml
+            parameters:
+              runInitialization: false
+              runPreJobCleanup: false
+              runCachePrep: false

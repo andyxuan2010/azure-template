@@ -1,0 +1,149 @@
+locals {
+  environment_tag_map = {
+    prod = "PROD"
+    dev  = "DEV"
+    qa   = "QA"
+    test = "TEST"
+    sbx  = "SBX"
+    poc  = "POC"
+  }
+
+  resource_group_lookup_required = trimspace(var.location) == "" || var.inherit_resource_group_tags
+  resource_group_name            = trimspace(var.resource_group_name)
+  location                       = trimspace(var.location) != "" ? trimspace(var.location) : data.azurerm_resource_group.rg[0].location
+  common_tags                    = var.inherit_resource_group_tags ? try(data.azurerm_resource_group.rg[0].tags, {}) : {}
+  is_windows                     = lower(var.os_type) == "windows"
+
+  location_code_map = {
+    australiaeast      = "aue"
+    brazilsouth        = "brs"
+    canadacentral      = "cac"
+    canadaeast         = "cae"
+    centralindia       = "cin"
+    centralus          = "cus"
+    eastasia           = "ea"
+    eastus             = "eus"
+    eastus2            = "eus2"
+    francecentral      = "frc"
+    germanywestcentral = "gwc"
+    japaneast          = "jpe"
+    koreacentral       = "krc"
+    northeurope        = "neu"
+    southcentralus     = "scus"
+    southeastasia      = "sea"
+    uksouth            = "uks"
+    ukwest             = "ukw"
+    westcentralus      = "wcus"
+    westeurope         = "weu"
+    westus             = "wus"
+    westus2            = "wus2"
+    westus3            = "wus3"
+  }
+  application_code_raw   = trimspace(var.workload_name) != "" ? trimspace(var.workload_name) : try(local.common_tags.application_id, "app")
+  application_code       = lower(join("", regexall("[a-z0-9-]", local.application_code_raw)))
+  name_prefix_normalized = lower(join("", regexall("[a-z0-9-]", var.name_prefix)))
+  location_code_resolved = trimspace(var.location_code) != "" ? trimspace(var.location_code) : lookup(local.location_code_map, lower(local.location), lower(join("", regexall("[a-z0-9]", replace(local.location, " ", "")))))
+  generated_suffix       = var.use_random_suffix ? try(random_string.suffix[0].result, "000001") : lower(join("", regexall("[a-z0-9-]", var.instance)))
+  generated_name_parts   = compact([local.name_prefix_normalized, local.application_code, var.include_environment_in_name ? var.app_env : "", local.location_code_resolved, local.generated_suffix])
+  generated_name_raw     = trim(join("-", local.generated_name_parts), "-")
+  function_app_name      = trimspace(var.name) != "" ? trimspace(var.name) : trim(substr(local.generated_name_raw != "" ? local.generated_name_raw : "func-app-dev-eus-001", 0, 60), "-")
+
+  storage_account_resource_group_name = trimspace(var.storage_account_resource_group_name) != "" ? trimspace(var.storage_account_resource_group_name) : local.resource_group_name
+  storage_account_name_resolved       = trimspace(var.storage_account_name) != "" ? trimspace(var.storage_account_name) : null
+  storage_key_vault_secret_id         = try(trimspace(var.storage_key_vault_secret_id), "") != "" ? trimspace(var.storage_key_vault_secret_id) : null
+  storage_uses_key_vault_secret       = local.storage_key_vault_secret_id != null
+  storage_uses_access_key             = !var.storage_uses_managed_identity && !local.storage_uses_key_vault_secret
+  storage_auth_mode                   = var.storage_uses_managed_identity ? "ManagedIdentity" : local.storage_uses_key_vault_secret ? "KeyVaultSecret" : "AccessKey"
+  storage_account_lookup_required     = local.storage_uses_access_key && trimspace(var.storage_account_access_key) == "" && local.storage_account_name_resolved != null
+  storage_account_access_key          = local.storage_uses_access_key ? (trimspace(var.storage_account_access_key) != "" ? var.storage_account_access_key : try(data.azurerm_storage_account.function[0].primary_access_key, null)) : null
+  storage_account_id                  = trimspace(var.storage_account_id) != "" ? trimspace(var.storage_account_id) : try(data.azurerm_storage_account.function[0].id, null)
+
+  key_vault_reference_identity_id_resolved = try(trimspace(var.key_vault_reference_identity_id), "") != "" ? trimspace(var.key_vault_reference_identity_id) : null
+  identity_ids = distinct(compact(concat(
+    [local.key_vault_reference_identity_id_resolved],
+    [for identity_id in var.identity_ids : trimspace(identity_id)]
+  )))
+  identity_type = join(", ", compact([var.system_assigned_identity_enabled ? "SystemAssigned" : "", length(local.identity_ids) > 0 ? "UserAssigned" : ""]))
+
+  vnet_integration_lookup_by_name = (
+    trimspace(var.virtual_network_subnet_id) == "" &&
+    trimspace(var.vnet_integration_subnet_name) != "" &&
+    trimspace(var.vnet_integration_vnet_name) != "" &&
+    trimspace(var.vnet_integration_network_resource_group_name) != ""
+  )
+  vnet_integration_subnet_id_resolved = trimspace(var.virtual_network_subnet_id) != "" ? trimspace(var.virtual_network_subnet_id) : try(data.azurerm_subnet.vnet_integration[0].id, null)
+
+  private_endpoint_subnet_lookup_by_name = (
+    var.enable_private_endpoint &&
+    trimspace(var.private_endpoint_subnet_id) == "" &&
+    trimspace(var.private_endpoint_subnet_name) != "" &&
+    trimspace(var.private_endpoint_vnet_name) != "" &&
+    trimspace(var.private_endpoint_network_resource_group_name) != ""
+  )
+  private_endpoint_subnet_id_resolved = trimspace(var.private_endpoint_subnet_id) != "" ? trimspace(var.private_endpoint_subnet_id) : try(data.azurerm_subnet.private_endpoint[0].id, null)
+
+  private_dns_zone_names_effective = toset(distinct(compact(concat(
+    trimspace(var.private_dns_zone_name) != "" ? [trimspace(var.private_dns_zone_name)] : [],
+    [for name in var.private_dns_zone_names : trimspace(name)]
+  ))))
+  private_dns_zone_ids = distinct(compact(concat(
+    trimspace(var.private_dns_zone_id) != "" ? [trimspace(var.private_dns_zone_id)] : [],
+    [for zone_id in var.private_dns_zone_ids : trimspace(zone_id)],
+    [for _, zone in data.azurerm_private_dns_zone.functionapp : zone.id]
+  )))
+  private_endpoint_name                   = trimspace(var.private_endpoint_name) != "" ? trimspace(var.private_endpoint_name) : "pep-${local.function_app_name}"
+  private_service_connection_name         = trimspace(var.private_service_connection_name) != "" ? trimspace(var.private_service_connection_name) : "psc-${local.function_app_name}-sites"
+  private_dns_zone_group_name             = trimspace(var.private_dns_zone_group_name) != "" ? trimspace(var.private_dns_zone_group_name) : "default"
+  private_endpoint_network_interface_name = trimspace(var.private_endpoint_network_interface_name) != "" ? trimspace(var.private_endpoint_network_interface_name) : null
+  private_endpoint_manual_request_message = trimspace(var.private_endpoint_manual_request_message) != "" ? trimspace(var.private_endpoint_manual_request_message) : null
+
+  function_app = local.is_windows ? (
+    var.storage_uses_managed_identity ? azurerm_windows_function_app.managed_identity[0] : azurerm_windows_function_app.key[0]
+    ) : (
+    var.storage_uses_managed_identity ? azurerm_linux_function_app.managed_identity[0] : azurerm_linux_function_app.key[0]
+  )
+
+  merged_tags = merge(
+    local.common_tags,
+    var.tags,
+    {
+      Environment = lookup(local.environment_tag_map, var.app_env, var.app_env)
+      workload    = var.workload
+    }
+  )
+
+  app_admin_group_values     = distinct(compact([for value in coalesce(var.app_admin_group, []) : trimspace(value)]))
+  app_user_group_values      = distinct(compact([for value in coalesce(var.app_user_group, []) : trimspace(value)]))
+  entra_object_id_pattern    = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+  app_admin_group_object_ids = toset([for value in local.app_admin_group_values : value if can(regex(local.entra_object_id_pattern, value))])
+  app_admin_group_names      = toset([for value in local.app_admin_group_values : value if !can(regex(local.entra_object_id_pattern, value))])
+  app_user_group_object_ids  = toset([for value in local.app_user_group_values : value if can(regex(local.entra_object_id_pattern, value))])
+  app_user_group_names       = toset([for value in local.app_user_group_values : value if !can(regex(local.entra_object_id_pattern, value))])
+
+  app_admin_group_principal_ids = merge(
+    { for object_id in local.app_admin_group_object_ids : "id:${object_id}" => object_id },
+    { for name, group in data.azuread_group.app_admin : "name:${name}" => group.object_id }
+  )
+  app_user_group_principal_ids = merge(
+    { for object_id in local.app_user_group_object_ids : "id:${object_id}" => object_id },
+    { for name, group in data.azuread_group.app_user : "name:${name}" => group.object_id }
+  )
+
+  diagnostic_destination_enabled = (
+    trimspace(var.log_analytics_workspace_id) != "" ||
+    trimspace(var.diagnostic_storage_account_id) != "" ||
+    trimspace(var.diagnostic_eventhub_authorization_rule_id) != ""
+  )
+  diagnostics_enabled     = (var.enable_diagnostics || local.diagnostic_destination_enabled) && local.diagnostic_destination_enabled
+  diagnostic_setting_name = trimspace(var.diagnostic_setting_name) != "" ? trimspace(var.diagnostic_setting_name) : "${local.function_app_name}-diagnostic-setting"
+
+  diagnostic_log_categories_effective = toset([
+    for category in var.diagnostic_log_categories :
+    category
+    if !contains(["AllLogs", "allLogs"], category)
+  ])
+  diagnostic_log_category_groups_effective = toset(distinct(concat(
+    var.diagnostic_log_category_groups,
+    [for category in var.diagnostic_log_categories : "allLogs" if contains(["AllLogs", "allLogs"], category)]
+  )))
+}
