@@ -1,0 +1,613 @@
+name: Terraform
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - sbx
+  pull_request:
+    branches:
+      - main
+      - dev
+      - sbx
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Run terraform apply after plan
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: true
+  TF_INPUT: false
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  check-required-secrets-variables:
+    name: Check Required Secrets and Variables
+    runs-on: ubuntu-latest
+    outputs:
+      has_azure_credentials: ${{ steps.preflight.outputs.has_azure_credentials }}
+      has_apply_inputs: ${{ steps.preflight.outputs.has_apply_inputs }}
+      has_stage_publish_inputs: ${{ steps.preflight.outputs.has_stage_publish_inputs }}
+      has_ado_dev_publish_inputs: ${{ steps.preflight.outputs.has_ado_dev_publish_inputs }}
+      has_ado_prod_publish_inputs: ${{ steps.preflight.outputs.has_ado_prod_publish_inputs }}
+    steps:
+      - name: Evaluate required secrets and variables
+        id: preflight
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ENABLE_GITHUB_APPLY: ${{ vars.ENABLE_GITHUB_APPLY }}
+          TF_BACKEND_READY: ${{ vars.TF_BACKEND_READY }}
+          STAGE_REPOSITORY: ${{ vars.STAGE_REPOSITORY }}
+          STAGE_REPO_TOKEN: ${{ secrets.STAGE_REPO_TOKEN }}
+          ADO_DEV_REPOSITORY: ${{ vars.ADO_DEV_REPOSITORY }}
+          ADO_REPO_DEV_PAT: ${{ secrets.ADO_REPO_DEV_PAT }}
+          ADO_PROD_REPOSITORY: ${{ vars.ADO_PROD_REPOSITORY }}
+          ADO_PROD_REPO_PAT: ${{ secrets.ADO_PROD_REPO_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          write_check() {
+            local input_type="$1"
+            local input_name="$2"
+            local input_value="$3"
+            local blue="\033[34m"
+            local yellow="\033[33m"
+            local green="\033[32m"
+            local red="\033[31m"
+            local reset="\033[0m"
+
+            if [[ -n "${input_value}" ]]; then
+              printf -- "- %b%s%b %b%s%b: %bpresent%b\n" "${blue}" "${input_type}" "${reset}" "${yellow}" "${input_name}" "${reset}" "${green}" "${reset}"
+            else
+              printf -- "- %b%s%b %b%s%b: %bmissing%b\n" "${blue}" "${input_type}" "${reset}" "${yellow}" "${input_name}" "${reset}" "${red}" "${reset}"
+            fi
+          }
+
+          echo "::group::Required secrets and variables"
+          echo "Validate and Plan / Validate Module Harness require:"
+          write_check "secret" "AZURE_CLIENT_ID" "${AZURE_CLIENT_ID}"
+          write_check "secret" "AZURE_CLIENT_SECRET" "${AZURE_CLIENT_SECRET}"
+          write_check "secret" "AZURE_TENANT_ID" "${AZURE_TENANT_ID}"
+          write_check "secret" "AZURE_SUBSCRIPTION_ID" "${AZURE_SUBSCRIPTION_ID}"
+          echo ""
+          echo "Apply requires:"
+          write_check "variable" "ENABLE_GITHUB_APPLY" "${ENABLE_GITHUB_APPLY}"
+          write_check "variable" "TF_BACKEND_READY" "${TF_BACKEND_READY}"
+          write_check "secret" "AZURE_CLIENT_ID" "${AZURE_CLIENT_ID}"
+          write_check "secret" "AZURE_CLIENT_SECRET" "${AZURE_CLIENT_SECRET}"
+          write_check "secret" "AZURE_TENANT_ID" "${AZURE_TENANT_ID}"
+          write_check "secret" "AZURE_SUBSCRIPTION_ID" "${AZURE_SUBSCRIPTION_ID}"
+          echo ""
+          echo "Publish Github Demo Repo requires:"
+          write_check "variable" "STAGE_REPOSITORY" "${STAGE_REPOSITORY}"
+          write_check "secret" "STAGE_REPO_TOKEN" "${STAGE_REPO_TOKEN}"
+          echo ""
+          echo "Publish ADO Dev Repo requires:"
+          write_check "variable" "ADO_DEV_REPOSITORY" "${ADO_DEV_REPOSITORY}"
+          write_check "secret" "ADO_REPO_DEV_PAT" "${ADO_REPO_DEV_PAT}"
+          echo ""
+          echo "Publish ADO Production Repo requires:"
+          write_check "variable" "ADO_PROD_REPOSITORY" "${ADO_PROD_REPOSITORY}"
+          write_check "secret" "ADO_PROD_REPO_PAT" "${ADO_PROD_REPO_PAT}"
+          echo "::endgroup::"
+
+          if [[ -n "${AZURE_CLIENT_ID}" && -n "${AZURE_CLIENT_SECRET}" && -n "${AZURE_TENANT_ID}" && -n "${AZURE_SUBSCRIPTION_ID}" ]]; then
+            echo "has_azure_credentials=true" >> "${GITHUB_OUTPUT}"
+            has_azure_credentials="true"
+          else
+            echo "has_azure_credentials=false" >> "${GITHUB_OUTPUT}"
+            has_azure_credentials="false"
+            echo "Azure validation secrets are missing. Validation jobs will be skipped."
+          fi
+
+          if [[ "${ENABLE_GITHUB_APPLY}" == "true" && "${TF_BACKEND_READY}" == "true" && "${has_azure_credentials}" == "true" ]]; then
+            echo "has_apply_inputs=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "has_apply_inputs=false" >> "${GITHUB_OUTPUT}"
+            echo "Apply is disabled, backend is not ready, or required Azure secrets are missing. Apply job will be skipped."
+          fi
+
+          if [[ -n "${STAGE_REPOSITORY}" && -n "${STAGE_REPO_TOKEN}" ]]; then
+            echo "has_stage_publish_inputs=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "has_stage_publish_inputs=false" >> "${GITHUB_OUTPUT}"
+            echo "Stage publish variable/secret is missing. Stage publish job will be skipped."
+          fi
+
+          if [[ -n "${ADO_DEV_REPOSITORY}" && -n "${ADO_REPO_DEV_PAT}" ]]; then
+            echo "has_ado_dev_publish_inputs=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "has_ado_dev_publish_inputs=false" >> "${GITHUB_OUTPUT}"
+            echo "ADO dev publish variable/secret is missing. ADO dev publish job will be skipped."
+          fi
+
+          if [[ -n "${ADO_PROD_REPOSITORY}" && -n "${ADO_PROD_REPO_PAT}" ]]; then
+            echo "has_ado_prod_publish_inputs=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "has_ado_prod_publish_inputs=false" >> "${GITHUB_OUTPUT}"
+            echo "ADO production publish variable/secret is missing. ADO production publish job will be skipped."
+          fi
+
+  validate-plan:
+    name: Validate and Plan
+    needs: check-required-secrets-variables
+    if: (github.repository != vars.STAGE_REPOSITORY || github.actor != 'github-actions[bot]') && needs['check-required-secrets-variables'].outputs.has_azure_credentials == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'dev' && 'dev' || github.ref_name == 'sbx' && 'sbx' || 'dev' }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve branch context
+        id: context
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch_name="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+
+          case "${branch_name}" in
+            main)
+              deploy_env="prod"
+              ;;
+            dev)
+              deploy_env="dev"
+              ;;
+            sbx)
+              deploy_env="sbx"
+              ;;
+            *)
+              deploy_env="dev"
+              ;;
+          esac
+
+          echo "branch_name=${branch_name}" >> "${GITHUB_OUTPUT}"
+          echo "deploy_env=${deploy_env}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init without backend
+        if: vars.TF_BACKEND_READY != 'true'
+        run: terraform init -input=false -no-color -backend=false
+
+      - name: Terraform Init with backend
+        if: vars.TF_BACKEND_READY == 'true'
+        run: terraform init -input=false -no-color -reconfigure
+
+      - name: Terraform fmt check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform root harness test
+        if: vars.TF_BACKEND_READY == 'true'
+        run: terraform test -filter=tests/root-plan.tftest.hcl -no-color
+
+      - name: Terraform plan
+        if: vars.TF_BACKEND_READY == 'true'
+        run: terraform plan -input=false -no-color -out=tfplan
+        env:
+          TF_VAR_environment: ${{ steps.context.outputs.deploy_env }}
+
+      - name: Upload plan artifact
+        if: github.event_name != 'pull_request' && vars.TF_BACKEND_READY == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ github.run_id }}
+          path: tfplan
+          if-no-files-found: error
+
+  detect-module-targets:
+    name: Detect Module Harness Targets
+    if: github.repository != vars.STAGE_REPOSITORY || github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    outputs:
+      has_modules: ${{ steps.detect.outputs.has_modules }}
+      module_matrix: ${{ steps.detect.outputs.module_matrix }}
+      module_list: ${{ steps.detect.outputs.module_list }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed module harness targets
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            base_ref="${PR_BASE_SHA}"
+            head_ref="${PR_HEAD_SHA}"
+          else
+            base_ref="${PUSH_BEFORE_SHA}"
+            head_ref="${PUSH_HEAD_SHA}"
+          fi
+
+          module_matrix="$(bash scripts/azure-pipelines/module-harness-targets.sh detect --base "${base_ref}" --head "${head_ref}" --format github-matrix)"
+          module_list_json="$(bash scripts/azure-pipelines/module-harness-targets.sh detect --base "${base_ref}" --head "${head_ref}" --format json-array)"
+
+          if [[ "${module_list_json}" == "[]" ]]; then
+            has_modules="false"
+          else
+            has_modules="true"
+          fi
+
+          echo "has_modules=${has_modules}" >> "${GITHUB_OUTPUT}"
+          echo "module_matrix=${module_matrix}" >> "${GITHUB_OUTPUT}"
+          echo "module_list=${module_list_json}" >> "${GITHUB_OUTPUT}"
+
+          echo "Selected module harness targets: ${module_list_json}"
+
+  validate-modules:
+    name: Validate Module Harness (${{ matrix.module }})
+    if: (github.repository != vars.STAGE_REPOSITORY || github.actor != 'github-actions[bot]') && needs['check-required-secrets-variables'].outputs.has_azure_credentials == 'true' && vars.TF_BACKEND_READY == 'true' && needs.detect-module-targets.outputs.has_modules == 'true'
+    runs-on: ubuntu-latest
+    needs:
+      - check-required-secrets-variables
+      - validate-plan
+      - detect-module-targets
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJson(needs.detect-module-targets.outputs.module_matrix) }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Build module harness overrides
+        shell: bash
+        env:
+          TARGET_MODULE: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          output_file="$RUNNER_TEMP/module-plan.tfvars.json"
+          bash scripts/azure-pipelines/module-harness-targets.sh overrides --module "$TARGET_MODULE" --output "$output_file"
+          echo "MODULE_TFVARS_FILE=$output_file" >> "$GITHUB_ENV"
+
+      - name: Terraform Init without backend
+        if: vars.TF_BACKEND_READY != 'true'
+        run: terraform init -input=false -no-color -backend=false
+
+      - name: Terraform Init with backend
+        if: vars.TF_BACKEND_READY == 'true'
+        run: terraform init -input=false -no-color -reconfigure
+
+      - name: Terraform plan selected module harness
+        if: vars.TF_BACKEND_READY == 'true'
+        run: terraform plan -input=false -no-color -lock=false -var-file="$MODULE_TFVARS_FILE"
+
+  apply:
+    name: Apply
+    # should be always false for the template repo to prevent accidental applies from forks, but can be enabled for downstream repos that want to allow applies from the workflow
+    if: always() && needs['check-required-secrets-variables'].outputs.has_apply_inputs == 'true' && needs.validate-plan.result == 'success' && (needs.validate-modules.result == 'success' || needs.validate-modules.result == 'skipped')
+    needs:
+      - check-required-secrets-variables
+      - validate-plan
+      - validate-modules
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'dev' && 'dev' || github.ref_name == 'sbx' && 'sbx' || 'dev' }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve branch context
+        id: context
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch_name="${GITHUB_REF_NAME}"
+
+          case "${branch_name}" in
+            main)
+              deploy_env="prod"
+              ;;
+            dev)
+              deploy_env="dev"
+              ;;
+            sbx)
+              deploy_env="sbx"
+              ;;
+            *)
+              deploy_env="dev"
+              ;;
+          esac
+
+          echo "deploy_env=${deploy_env}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init -input=false -no-color -reconfigure
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -input=false -no-color
+        env:
+          TF_VAR_environment: ${{ steps.context.outputs.deploy_env }}
+
+  create-git-tag:
+    name: Create Git Tag
+    if: always() && github.event_name != 'pull_request' && github.repository != vars.STAGE_REPOSITORY && needs.validate-plan.result == 'success' && (needs.validate-modules.result == 'success' || needs.validate-modules.result == 'skipped')
+    needs:
+      - validate-plan
+      - validate-modules
+    outputs:
+      release_tag: ${{ steps.semver.outputs.release_tag }}
+      release_notes: ${{ steps.semver.outputs.release_notes }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create canonical GitHub release tag
+        id: semver
+        env:
+          SOURCE_BRANCH: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          release_tag_file="$(mktemp)"
+          release_notes_file="$(mktemp)"
+
+          bash scripts/create-release-tag.sh \
+            --source-branch "${SOURCE_BRANCH}" \
+            --source-sha "${SOURCE_SHA}" \
+            --release-tag-file "${release_tag_file}" \
+            --release-notes-file "${release_notes_file}"
+
+          {
+            echo "release_tag=$(cat "${release_tag_file}")"
+            echo "release_notes<<EOF"
+            cat "${release_notes_file}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+  publish-stage-repo:
+    name: Publish Github Demo Repo
+    if: always() && github.event_name != 'pull_request' && github.repository != vars.STAGE_REPOSITORY && needs['check-required-secrets-variables'].outputs.has_stage_publish_inputs == 'true' && needs.validate-plan.result == 'success' && (needs.create-git-tag.result == 'success' || needs.create-git-tag.result == 'skipped')
+    needs:
+      - check-required-secrets-variables
+      - validate-plan
+      - create-git-tag
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'dev' && 'dev' || github.ref_name == 'sbx' && 'sbx' || 'dev' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Publish clean snapshot to stage repo
+        env:
+          STAGE_REPOSITORY: ${{ vars.STAGE_REPOSITORY }}
+          STAGE_REPO_TOKEN: ${{ secrets.STAGE_REPO_TOKEN }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ needs.create-git-tag.outputs.release_tag }}
+          RELEASE_NOTES: ${{ needs.create-git-tag.outputs.release_notes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${STAGE_REPO_TOKEN}" ]]; then
+            echo "Missing required secret: STAGE_REPO_TOKEN" >&2
+            exit 1
+          fi
+
+          if [[ -z "${STAGE_REPOSITORY}" ]]; then
+            echo "Missing required repository variable: STAGE_REPOSITORY" >&2
+            exit 1
+          fi
+
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "${workdir}"' EXIT
+
+          rsync -a \
+            --exclude='.git' \
+            "${GITHUB_WORKSPACE}/" "${workdir}/repo/"
+
+          cd "${workdir}/repo"
+
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${SOURCE_BRANCH}"
+          git add .
+          git commit -m "Stage snapshot from ${SOURCE_BRANCH}@${SOURCE_SHA}"
+
+          if [[ -n "${RELEASE_TAG}" ]]; then
+            release_notes="${RELEASE_NOTES:-}"
+            if [[ -z "${release_notes}" ]]; then
+              release_notes="- ${SOURCE_SHA}"
+            fi
+
+            tag_message="$(mktemp)"
+            {
+              echo "Release ${RELEASE_TAG} snapshot"
+              echo
+              echo "Source: ${SOURCE_BRANCH}@${SOURCE_SHA}"
+              echo
+              echo "Changes:"
+              printf '%s\n' "${release_notes}"
+            } > "${tag_message}"
+
+            git tag -a "${RELEASE_TAG}" -F "${tag_message}"
+          fi
+
+          target_repo="github.com/${STAGE_REPOSITORY%.git}"
+          git remote add origin "https://x-access-token:${STAGE_REPO_TOKEN}@${target_repo}.git"
+          git push --force origin "${SOURCE_BRANCH}"
+          if [[ -n "${RELEASE_TAG}" ]]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+              echo "Stage repo already has tag ${RELEASE_TAG}; leaving it unchanged."
+            else
+              git push origin "refs/tags/${RELEASE_TAG}"
+            fi
+          fi
+
+  publish-ado-dev-repo:
+    name: Publish ADO Dev Repo
+    if: always() && github.event_name != 'pull_request' && github.repository != vars.STAGE_REPOSITORY && needs['check-required-secrets-variables'].outputs.has_ado_dev_publish_inputs == 'true' && needs.validate-plan.result == 'success' && (needs.create-git-tag.result == 'success' || needs.create-git-tag.result == 'skipped')
+    needs:
+      - check-required-secrets-variables
+      - validate-plan
+      - create-git-tag
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'dev' && 'dev' || github.ref_name == 'sbx' && 'sbx' || 'dev' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Publish Git history to Azure DevOps repo
+        env:
+          ADO_DEV_REPOSITORY: ${{ vars.ADO_DEV_REPOSITORY }}
+          ADO_REPO_DEV_PAT: ${{ secrets.ADO_REPO_DEV_PAT }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ needs.create-git-tag.outputs.release_tag }}
+          RELEASE_NOTES: ${{ needs.create-git-tag.outputs.release_notes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${ADO_REPO_DEV_PAT}" ]]; then
+            echo "Missing required secret: ADO_REPO_DEV_PAT" >&2
+            exit 1
+          fi
+
+          if [[ -z "${ADO_DEV_REPOSITORY}" ]]; then
+            echo "Missing required repository variable: ADO_DEV_REPOSITORY" >&2
+            exit 1
+          fi
+
+          cd "${GITHUB_WORKSPACE}"
+
+          git fetch --force --tags origin
+
+          target_repo="dev.azure.com/${ADO_DEV_REPOSITORY}"
+          git remote remove ado 2>/dev/null || true
+          git remote add ado "https://ado:${ADO_REPO_DEV_PAT}@${target_repo}"
+
+          git checkout "${SOURCE_BRANCH}"
+          git push --force ado "refs/heads/${SOURCE_BRANCH}:refs/heads/${SOURCE_BRANCH}"
+
+          if [[ -n "${RELEASE_TAG}" ]]; then
+            origin_tag_ref="$(git ls-remote origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')"
+            if [[ -z "${origin_tag_ref}" ]]; then
+              echo "GitHub tag ${RELEASE_TAG} was not found on origin." >&2
+              exit 1
+            fi
+
+            git tag -d "${RELEASE_TAG}" >/dev/null 2>&1 || true
+            git fetch origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+            git push --force ado "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          fi
+
+  publish-ado-production-repo:
+    name: Publish ADO Production Repo
+    if: false && needs['check-required-secrets-variables'].outputs.has_ado_prod_publish_inputs == 'true'
+    needs:
+      - check-required-secrets-variables
+      - validate-plan
+      - create-git-tag
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Publish Git history to Azure DevOps production repo
+        env:
+          ADO_PROD_REPOSITORY: ${{ vars.ADO_PROD_REPOSITORY }}
+          ADO_PROD_REPO_PAT: ${{ secrets.ADO_PROD_REPO_PAT }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ needs.create-git-tag.outputs.release_tag }}
+          RELEASE_NOTES: ${{ needs.create-git-tag.outputs.release_notes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${ADO_PROD_REPO_PAT}" ]]; then
+            echo "Missing required secret: ADO_PROD_REPO_PAT" >&2
+            exit 1
+          fi
+
+          if [[ -z "${ADO_PROD_REPOSITORY}" ]]; then
+            echo "Missing required repository variable: ADO_PROD_REPOSITORY" >&2
+            exit 1
+          fi
+
+          cd "${GITHUB_WORKSPACE}"
+
+          git fetch --force --tags origin
+
+          target_repo="dev.azure.com/${ADO_PROD_REPOSITORY}"
+          git remote remove ado-prod 2>/dev/null || true
+          git remote add ado-prod "https://ado:${ADO_PROD_REPO_PAT}@${target_repo}"
+
+          git checkout "${SOURCE_BRANCH}"
+          git push --force ado-prod "refs/heads/${SOURCE_BRANCH}:refs/heads/${SOURCE_BRANCH}"
+
+          if [[ -n "${RELEASE_TAG}" ]]; then
+            origin_tag_ref="$(git ls-remote origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')"
+            if [[ -z "${origin_tag_ref}" ]]; then
+              echo "GitHub tag ${RELEASE_TAG} was not found on origin." >&2
+              exit 1
+            fi
+
+            git tag -d "${RELEASE_TAG}" >/dev/null 2>&1 || true
+            git fetch origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+            git push --force ado-prod "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          fi
