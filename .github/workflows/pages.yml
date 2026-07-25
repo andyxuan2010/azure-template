@@ -1,19 +1,18 @@
-name: Publish documentation portal
+name: Deploy GitHub Pages
 
 on:
   push:
     branches:
       - main
     paths:
-      - "**/*.md"
-      - "**/*.MD"
-      - "**/*.pdf"
-      - "**/*.vsdx"
       - "index.html"
-      - "docs-manifest.json"
       - ".nojekyll"
       - ".github/workflows/pages.yml"
-      - "scripts/generate-docs-manifest.ps1"
+      - "README.md"
+      - "README.MD"
+      - "readme.md"
+      - "readme.MD"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
@@ -22,79 +21,24 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.repository }}
   cancel-in-progress: true
 
 jobs:
-  publish-stage-repo:
-    name: Publish Github Demo Repo
-    if: github.repository == 'CCOE-Azure/azure-template'
-    runs-on: ubuntu-latest
-    environment: prod
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
-
-      - name: Publish clean snapshot to demo repo
-        env:
-          STAGE_REPOSITORY: ${{ vars.STAGE_REPOSITORY }}
-          STAGE_REPO_TOKEN: ${{ secrets.STAGE_REPO_TOKEN }}
-          SOURCE_BRANCH: ${{ github.ref_name }}
-          SOURCE_SHA: ${{ github.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ -z "${STAGE_REPO_TOKEN}" ]]; then
-            echo "Missing required secret: STAGE_REPO_TOKEN" >&2
-            exit 1
-          fi
-
-          if [[ -z "${STAGE_REPOSITORY}" ]]; then
-            echo "Missing required repository variable: STAGE_REPOSITORY" >&2
-            exit 1
-          fi
-
-          workdir="$(mktemp -d)"
-          trap 'rm -rf "${workdir}"' EXIT
-
-          rsync -a \
-            --exclude='.git' \
-            "${GITHUB_WORKSPACE}/" "${workdir}/repo/"
-
-          cd "${workdir}/repo"
-
-          git init
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "${SOURCE_BRANCH}"
-          git add .
-          git commit -m "Documentation snapshot from ${SOURCE_BRANCH}@${SOURCE_SHA}"
-
-          target_repo="github.com/${STAGE_REPOSITORY%.git}"
-          git remote add origin "https://x-access-token:${STAGE_REPO_TOKEN}@${target_repo}.git"
-          git push --force origin "${SOURCE_BRANCH}"
-
   deploy:
-    if: github.repository == 'CCOE-Azure-Terraform/azure-template'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
-
+        uses: actions/checkout@v4
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
-
       - name: Upload site
         uses: actions/upload-pages-artifact@v4
         with:
           path: .
-
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
