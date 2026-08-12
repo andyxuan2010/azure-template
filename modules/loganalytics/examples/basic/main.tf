@@ -1,0 +1,31 @@
+terraform {
+  required_version = ">= 1.6.0"
+
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = ">= 4.0, < 5.0"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {}
+}
+
+module "log_analytics" {
+  source = "../.."
+
+  name                          = var.name
+  resource_group_name           = var.resource_group_name
+  location                      = var.location
+  retention_in_days             = 90
+  local_authentication_disabled = true
+  inherit_resource_group_tags   = false
+  inherited_resource_group_tags = {}
+
+  tags = {
+    Environment = "dev"
+    Owner       = "Observability Team"
+  }
+}
