@@ -1,0 +1,28 @@
+name: Module Standards
+
+on:
+  pull_request:
+    paths:
+      - "modules/**"
+      - "docs/**"
+      - "scripts/check_module_standards.py"
+      - ".github/workflows/module-standards.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  module-standards:
+    name: Module documentation and test standards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Set the MODULE_STANDARDS_MODE repository variable to "fail" to block merges on findings.
+      MODULE_STANDARDS_MODE: ${{ vars.MODULE_STANDARDS_MODE || 'warn' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check module standards
+        run: python3 scripts/check_module_standards.py --mode "$MODULE_STANDARDS_MODE"
