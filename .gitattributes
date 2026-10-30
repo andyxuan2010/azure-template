@@ -1,0 +1,10 @@
+# Module documentation is generated with terraform-docs on LF; keep it stable across platforms.
+modules/**/*.md text eol=lf
+*.tf text eol=lf
+*.hcl text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.ps1 text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf

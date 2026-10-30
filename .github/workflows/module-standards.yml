@@ -1,0 +1,36 @@
+name: Module Standards
+
+on:
+  push:
+    branches: [main, dev, sbx]
+  pull_request:
+    paths:
+      - "modules/**"
+      - "docs/**"
+      - "scripts/check_module_standards.py"
+      - "scripts/stage-docs.py"
+      - "scripts/Test-TerraformModules.ps1"
+      - "tests/test_*.py"
+      - ".github/workflows/module-standards.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  module-standards:
+    name: Module documentation and test standards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # An explicit "warn" remains available for a documented temporary exception.
+      MODULE_STANDARDS_MODE: ${{ vars.MODULE_STANDARDS_MODE || 'fail' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check module standards
+        run: python3 scripts/check_module_standards.py --mode "$MODULE_STANDARDS_MODE"
+
+      - name: Repository tooling tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
