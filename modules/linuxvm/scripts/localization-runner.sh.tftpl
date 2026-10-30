@@ -1,0 +1,131 @@
+#!/bin/bash
+set -euo pipefail
+
+VM_NAME="${localization_vm_name}"
+OS_SCRIPT_NAME="${localization_os_script_name}"
+VM_SCRIPT_NAME="${localization_vm_script_name}"
+OS_SCRIPT_URL="${localization_blob_base_url}/${localization_os_script_name}"
+VM_SCRIPT_URL="${localization_vm_script_url}"
+LOCALIZATION_ROOT="/opt/localization"
+OS_SCRIPT_PATH="$${LOCALIZATION_ROOT}/$${OS_SCRIPT_NAME}"
+VM_SCRIPT_PATH="$${LOCALIZATION_ROOT}/$${VM_SCRIPT_NAME}"
+MERGED_SCRIPT_PATH="$${LOCALIZATION_ROOT}/merged-localization.sh"
+LOG_DIR="/var/log/localization"
+LOG_FILE="$${LOG_DIR}/localization-${localization_vm_name}.log"
+
+install_azcopy_cli() {
+  local arch
+  local tar_file
+  local download_url
+  local extracted_dir
+
+  command -v curl >/dev/null 2>&1 || return 0
+  command -v tar >/dev/null 2>&1 || return 0
+
+  arch="$(uname -m)"
+  case "$${arch}" in
+    x86_64) arch="amd64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *) echo "[!] Unsupported architecture for AzCopy install: $${arch}"; return 0 ;;
+  esac
+
+  tar_file="/tmp/azcopy.tar.gz"
+  download_url="https://aka.ms/downloadazcopy-v10-linux"
+  curl -fsSL "$${download_url}" -o "$${tar_file}" || return 0
+  mkdir -p /tmp/azcopy-extract
+  tar -xzf "$${tar_file}" -C /tmp/azcopy-extract || return 0
+  extracted_dir=$(find /tmp/azcopy-extract -maxdepth 1 -type d -name "azcopy_linux_*" | head -n 1)
+  [ -n "$${extracted_dir}" ] && [ -f "$${extracted_dir}/azcopy" ] && install -o root -g root -m 0755 "$${extracted_dir}/azcopy" /usr/local/bin/azcopy || true
+  command -v azcopy >/dev/null 2>&1 && azcopy --version || true
+}
+
+download_optional_blob() {
+  local blob_url="$1"
+  local destination_path="$2"
+  local description="$3"
+
+  if [ -z "$${blob_url}" ]; then
+    echo "$${description} URL is empty; skipping."
+    return 1
+  fi
+
+  if azcopy cp "$${blob_url}" "$${destination_path}" --overwrite=true; then
+    if [ ! -s "$${destination_path}" ]; then
+      echo "$${description} downloaded but is empty: $${destination_path}; skipping."
+      rm -f "$${destination_path}"
+      return 1
+    fi
+
+    echo "$${description} downloaded: $${destination_path}"
+    return 0
+  fi
+
+  echo "$${description} not found or could not be downloaded: $${blob_url}; skipping."
+  rm -f "$${destination_path}"
+  return 1
+}
+
+mkdir -p "$${LOCALIZATION_ROOT}" "$${LOG_DIR}"
+touch "$${LOG_FILE}"
+chmod 0600 "$${LOG_FILE}" || true
+exec >>"$${LOG_FILE}" 2>&1
+
+echo "===== Linux VM localization start ====="
+date -u
+echo "VM name: $${VM_NAME}"
+echo "Localization container: ${localization_container_name}"
+echo "OS script blob: $${OS_SCRIPT_NAME}"
+echo "VM script blob: $${VM_SCRIPT_NAME}"
+echo "Blob base URL: ${localization_blob_base_url}"
+
+set -x
+
+if ! command -v azcopy >/dev/null 2>&1; then
+  install_azcopy_cli
+fi
+
+if ! command -v azcopy >/dev/null 2>&1; then
+  echo "azcopy is required for VM-specific localization download but was not found."
+  exit 1
+fi
+
+azcopy login --identity
+
+rm -f "$${MERGED_SCRIPT_PATH}" "$${OS_SCRIPT_PATH}" "$${VM_SCRIPT_PATH}"
+
+if [ -n "$${OS_SCRIPT_NAME}" ]; then
+  if download_optional_blob "$${OS_SCRIPT_URL}" "$${OS_SCRIPT_PATH}" "OS localization script"; then
+    cat "$${OS_SCRIPT_PATH}" >"$${MERGED_SCRIPT_PATH}"
+    printf "\n\n# ----- End of %s -----\n" "$${OS_SCRIPT_NAME}" >>"$${MERGED_SCRIPT_PATH}"
+  fi
+else
+  echo "OS localization script name is empty; skipping OS-level localization script."
+fi
+
+if [ -n "$${VM_SCRIPT_NAME}" ]; then
+  if download_optional_blob "$${VM_SCRIPT_URL}" "$${VM_SCRIPT_PATH}" "VM-specific localization script"; then
+    if [ ! -f "$${MERGED_SCRIPT_PATH}" ]; then
+      cat "$${VM_SCRIPT_PATH}" >"$${MERGED_SCRIPT_PATH}"
+    else
+      printf "\n\n# ----- Begin %s -----\n" "$${VM_SCRIPT_NAME}" >>"$${MERGED_SCRIPT_PATH}"
+      cat "$${VM_SCRIPT_PATH}" >>"$${MERGED_SCRIPT_PATH}"
+      printf "\n\n# ----- End of %s -----\n" "$${VM_SCRIPT_NAME}" >>"$${MERGED_SCRIPT_PATH}"
+    fi
+    echo "Merged VM-specific localization script: $${VM_SCRIPT_NAME}"
+  else
+    echo "No VM-specific localization script found for $${VM_NAME}; continuing with OS script only."
+  fi
+else
+  echo "VM-specific localization script name is empty; skipping VM-level localization script."
+fi
+
+if [ ! -s "$${MERGED_SCRIPT_PATH}" ]; then
+  echo "No localization content was available to run; skipping localization."
+  exit 0
+fi
+
+chmod 0700 "$${MERGED_SCRIPT_PATH}"
+/bin/bash "$${MERGED_SCRIPT_PATH}"
+
+echo "===== Linux VM localization complete ====="
+date -u
