@@ -1,0 +1,97 @@
+name: Publish documentation portal
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.md"
+      - "**/*.MD"
+      - "**/*.pdf"
+      - "**/*.vsdx"
+      - "index.html"
+      - "docs-manifest.json"
+      - ".nojekyll"
+      - ".github/workflows/pages.yml"
+      - "scripts/New-DocsManifest.ps1"
+      - "scripts/stage_docs.py"
+      - "assets/**"
+      - "docs/images/**"
+  workflow_dispatch:
+  repository_dispatch:
+    types:
+      - stage-snapshot
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  documentation-portal-gate:
+    name: Documentation Portal Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - name: Evaluate IS_ORIGIN
+        id: gate
+        shell: bash
+        env:
+          IS_ORIGIN: ${{ vars.IS_ORIGIN }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${IS_ORIGIN,,}" == "true" ]]; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+            echo "Documentation portal workflow is enabled for the origin repository."
+          else
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "Documentation portal workflow is disabled for the mirror repository."
+          fi
+
+  deploy:
+    needs: documentation-portal-gate
+    name: Publish Azure documentation portal
+    if: needs.documentation-portal-gate.outputs.enabled == 'false' && github.ref == 'refs/heads/main'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Generate documentation manifest
+        shell: pwsh
+        run: ./scripts/New-DocsManifest.ps1
+
+      - name: Skip GitHub Pages deployment for private repository
+        if: github.event.repository.visibility != 'public'
+        run: echo "Repository is private; GitHub Pages configuration and deployment will be skipped."
+
+      - name: Configure GitHub Pages
+        if: github.event.repository.visibility == 'public'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Stage public documentation
+        if: github.event.repository.visibility == 'public'
+        run: python3 scripts/stage_docs.py "$RUNNER_TEMP/documentation-site"
+
+      - name: Upload site
+        if: github.event.repository.visibility == 'public'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/documentation-site
+
+      - name: Deploy
+        if: github.event.repository.visibility == 'public'
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
