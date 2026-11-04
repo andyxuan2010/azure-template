@@ -1,0 +1,15 @@
+name: Setup Terraform
+description: Install the Terraform version passed in by the calling job.
+
+inputs:
+  terraform_version:
+    description: Terraform version to install.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install Terraform
+      uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+      with:
+        terraform_version: ${{ inputs.terraform_version }}
