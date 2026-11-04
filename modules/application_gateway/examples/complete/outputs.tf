@@ -1,0 +1,14 @@
+output "application_gateway_id" {
+  description = "Resource ID of the Application Gateway."
+  value       = module.application_gateway.id
+}
+
+output "public_ip_address" {
+  description = "Public IP address assigned to the gateway."
+  value       = module.application_gateway.public_ip_address
+}
+
+output "url_path_map_names" {
+  description = "Configured URL path map names."
+  value       = module.application_gateway.url_path_map_names
+}
