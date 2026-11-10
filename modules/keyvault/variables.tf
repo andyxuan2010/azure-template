@@ -216,7 +216,7 @@ variable "network_acls_ip_rules" {
   validation {
     condition = alltrue([
       for value in var.network_acls_ip_rules :
-      can(cidrhost(contains(value, "/") ? value : "${value}/32", 0))
+      can(cidrhost(strcontains(value, "/") ? value : "${value}/32", 0))
     ])
     error_message = "network_acls_ip_rules entries must be valid IPv4 or IPv6 addresses or CIDR ranges."
   }
