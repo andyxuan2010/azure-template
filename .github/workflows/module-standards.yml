@@ -1,0 +1,69 @@
+name: Module Standards
+
+on:
+  push:
+    branches: [main, dev, sbx]
+  pull_request:
+    paths:
+      - "modules/**"
+      - "docs/**"
+      - "scripts/check_module_standards.py"
+      - "scripts/stage_docs.py"
+      - "scripts/Test-TerraformModules.ps1"
+      - "tests/test_*.py"
+      - ".github/workflows/module-standards.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  module-standards:
+    name: Module documentation and test standards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # An explicit "warn" remains available for a documented temporary exception.
+      MODULE_STANDARDS_MODE: ${{ vars.MODULE_STANDARDS_MODE || 'fail' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check module standards
+        run: python3 scripts/check_module_standards.py --cloud azure --mode "$MODULE_STANDARDS_MODE"
+
+      - name: Repository tooling tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
+  service-connection-modules:
+    name: Validate ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [ado_service_connection_acr, ado_service_connection_azurerm]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Terraform
+        uses: ./.github/actions/setup-terraform
+        with:
+          terraform_version: '1.15.8'
+
+      - name: Validate and test standalone bootstrap module
+        shell: bash
+        env:
+          MODULE_PATH: modules/${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          terraform -chdir="$MODULE_PATH" fmt -check -recursive
+          terraform -chdir="$MODULE_PATH" init -backend=false -input=false -no-color
+          terraform -chdir="$MODULE_PATH" validate -no-color
+          terraform -chdir="$MODULE_PATH" test -no-color | tee "$RUNNER_TEMP/service-connection-tests.log"
+          grep -Eq 'Success! [1-9][0-9]* passed' "$RUNNER_TEMP/service-connection-tests.log"
+          for example in "$MODULE_PATH"/examples/*; do
+            terraform -chdir="$example" init -backend=false -input=false -no-color
+            terraform -chdir="$example" validate -no-color
+          done
