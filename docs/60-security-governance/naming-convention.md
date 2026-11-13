@@ -1,0 +1,275 @@
+# Resource Naming Convention
+
+This document records the current naming patterns used by the root harness and modules, then defines the recommended convention for new module work. The repository does not yet use one universal convention everywhere, so treat the "Current Module Patterns" section as an inventory and the "Target Convention" section as the direction for new changes.
+
+## Target Convention
+
+Use lowercase, deterministic names unless the Azure resource type requires a different character set. Prefer hyphens for Azure resource names that allow them, and avoid whitespace, underscores, trailing hyphens, and consecutive hyphens.
+
+Default shape for most Azure resources:
+
+```text
+<resource-type>-<workload>-<region-code>-<environment>-<instance>
+```
+
+Examples:
+
+```text
+rg-platform-cc-dev-601
+vnet-platform-cc-dev-601
+snet-app-cc-dev-601
+lb-platform-cc-dev-601
+rt-platform-cc-dev-601
+nsg-platform-cc-dev-601
+```
+
+Use this order unless the Azure resource is global, region is not available at the point where the name is generated, or the resource type has a stricter naming constraint. For global or non-regional resources, omit the region segment rather than inserting a placeholder:
+
+```text
+<resource-type>-<workload>-<environment>-<instance>
+```
+
+Examples:
+
+```text
+mg-platform-dev-601
+policy-allowed-location-dev-601
+appreg-platform-dev-601
+```
+
+Use compact names for resources with stricter Azure limits:
+
+```text
+st<workload><region-code><environment><instance>
+kv<workload><region-code><environment><instance>
+```
+
+Examples:
+
+```text
+stplatformccdev601
+kvplatformccdev601
+```
+
+For Windows and Linux VMs, keep the Azure VM name and `computer_name` Windows-safe. Windows computer names are limited to 15 characters, and both VM modules use the same value for resource name and computer name, whether generated or set through `custom_vm_names`.
+
+Recommended VM shape:
+
+```text
+<os><workload><region-code><env-code><instance>
+```
+
+Examples:
+
+```text
+wplatccd601
+lplatccd601
+```
+
+Where:
+
+| Segment | Meaning | Example |
+| --- | --- | --- |
+| `resource-type` | Azure resource abbreviation | `rg`, `vnet`, `lb`, `nsg` |
+| `os` | VM operating system marker | `w`, `l` |
+| `workload` | Short workload/application code | `platform`, `plat`, `app` |
+| `environment` | Full environment | `dev`, `test`, `qa`, `prod`, `sbx` |
+| `env-code` | Short VM-safe environment code | `d`, `t`, `q`, `p`, `s` |
+| `region-code` | Short Azure region code | `cc`, `ce`, `eus`, `eus2` |
+| `instance` | Three-digit sequence | `001`, `002`, `003` |
+
+## Azure DevOps service connections and related resources
+
+The [ACR connection module](../../modules/ado_service_connection_acr/README.md) and [ARM connection module](../../modules/ado_service_connection_azurerm/README.md) require an explicit service connection `name`; neither generates that name. They generate only the federated credential name when `federated_credential_name` is omitted or null.
+
+### Current defaults and shipped examples
+
+| Item | Current behavior | Example |
+| --- | --- | --- |
+| ACR service connection | Required caller-supplied name | `sc-orders-acrbaccidmpoc-dev-601` |
+| ARM service connection | Required caller-supplied name | `sc-orders-azurerm-dev-601` |
+| ACR federated credential | `ado-acr-<24-character-hash>` | `ado-acr-9169d382d49a45dec19d05d5` |
+| ARM federated credential | `ado-azurerm-<24-character-hash>` | `ado-azurerm-b2782b41814a29fbec4df7ed` |
+
+These exact credential names use project ID `11111111-1111-1111-1111-111111111111` and the shipped service connection names above. Both modules compute the suffix with:
+
+```hcl
+substr(sha256("${var.project_id}/${var.name}"), 0, 24)
+```
+
+The endpoint-type prefix distinguishes ACR and ARM trust names even if both connections use the same project and name. The hash is deterministic, not a random value or a secret. A project/name change alters the generated credential name and can replace trust.
+
+### Recommended workload names
+
+For explicit service connection and publishing identity names, use:
+
+```text
+# ACR connection and its publishing identity:
+sc-<workload>-<registry-name>-<environment>-<instance>
+id-<workload>-<registry-name>-<region-code>-<environment>-<instance>
+
+# ARM deployment connection:
+sc-<workload>-azurerm-<environment>-<instance>
+```
+
+Use the actual registry name in the ACR connection and publishing identity, for example `acrbaccidmpoc`, rather than the literal `acr`. Keep the registry name unchanged even when its text contains an environment-like suffix; the connection's environment segment identifies the intended deployment environment.
+
+| Environment | First instance | Next instance | ACR connection example | Publishing identity example (Canada Central) |
+| --- | --- | --- | --- | --- |
+| `dev` | `601` | `602` | `sc-orders-acrbaccidmpoc-dev-601` | `id-orders-acrbaccidmpoc-cc-dev-601` |
+| `prod` | `001` | `002` | `sc-orders-acrbaccidmpoc-prod-001` | `id-orders-acrbaccidmpoc-cc-prod-001` |
+| `qa` | `301` | `302` | `sc-orders-acrbaccidmpoc-qa-301` | `id-orders-acrbaccidmpoc-cc-qa-301` |
+
+This is the convention for new names. Connection names are explicit inputs; pass `instance = "601"` for dev, `"001"` for prod, or `"301"` for QA when generating related managed identity names. Existing modules that default instance to `001` do not automatically switch that default based on the environment. Do not rename deployed resources solely to match these examples without reviewing replacement and trust impacts.
+
+This is a recommended caller convention, not a format enforced or generated by the connection modules. Service connections are project-level CI resources, so the convention omits a region. For an orders application in Canada Central (`cc`), production instance `001`:
+
+| Resource | Example name | Ownership and generation |
+| --- | --- | --- |
+| ACR service connection | `sc-orders-acrbaccidmpoc-prod-001` | Explicit connection module input |
+| ARM deployment connection | `sc-orders-azurerm-prod-001` | Explicit connection module input |
+| Image-publishing identity | `id-orders-acrbaccidmpoc-cc-prod-001` | Existing identity; generated by `managed_identity` with workload `orders-acrbaccidmpoc`, or explicitly supplied there |
+| Deployment identity | `id-orders-deploy-cc-prod-001` | Existing identity; generated by `managed_identity` with workload `orders-deploy`, or explicitly supplied there |
+| Container registry | `acrbaccidmpoc` | Existing registry; its actual name is reused in the publishing connection and identity |
+| Resource group | `rg-orders-cc-prod-001` | Existing dependency following the target convention |
+
+When their own name overrides are empty, the existing identity module generates `id-<workload>-<region-code>-<environment>-<instance>` and the ACR module generates `acr<workload><region-code><environment><instance>` without separators. In those modules the environment input is currently named `app_env`. These examples use location `canadacentral`, `app_env = "prod"`, and `instance = "001"`. Registry names must also satisfy global availability; the naming formula does not guarantee uniqueness.
+
+The connection modules consume resource IDs and identity metadata; they do not create or rename the registry, identities, project, subscription or resource group. Keep image publishing and infrastructure deployment identities separate when their permissions differ.
+
+### Explicit overrides and existing credentials
+
+For a new connection, use the generated credential name:
+
+```hcl
+federated_credential_name = null
+```
+
+For an existing connection deployed with the original default, retain its name explicitly to avoid an unintended trust replacement:
+
+```hcl
+federated_credential_name = "ado-service-connection"
+```
+
+Caller-supplied credential names must be unique within the managed identity. Review the plan before changing project, connection or credential names. Use the modules' `federated_credential_name` output to inspect the effective name.
+
+## Current Root Harness Patterns
+
+The root harness defines `local.name_suffix = "<workload>-<environment>"` and uses it for many root-wired modules.
+
+| Pattern | Example |
+| --- | --- |
+| `<rtype>-<workload>-<environment>` | `aks-template-dev`, `agw-template-dev`, `aa-template-dev` |
+| `<rtype><workload><environment>001` | `acrtemplatedev001` |
+| `<rtype><workload><region-code><environment>` | `sttemplateccdev`, `kvtemplateccdev` |
+| `vm<workload><environment>` truncated to 12 chars, then module appends an environment suffix | `vmtemplatede601` |
+| Explicit or map-driven names | `lb-001` |
+
+Root shared values currently include:
+
+| Local | Current expression | Example |
+| --- | --- | --- |
+| `name_suffix` | `<workload>-<environment>` | `template-dev` |
+| `storage_account_name` | `st<workload><region-code><environment>` | `sttemplateccdev` |
+| `key_vault_name` | `kv<workload><region-code><environment>` | `kvtemplateccdev` |
+| `log_analytics_name` | `law-<workload>-<environment>` | `law-template-dev` |
+| `app_service_plan_name` | `asp-<workload>-<environment>` | `asp-template-dev` |
+| `vm_name` | `vm<workload><environment>`, max 12 chars | `vmtemplatede` |
+
+## Current Module Patterns
+
+| Module | Current naming pattern | Example |
+| --- | --- | --- |
+| `acr` | Root uses `acr<workload><environment>001`; module-generated names use compact `acr<workload><region-code><environment><instance>` without separators. | `acrtemplatedev001` |
+| `ado_service_connection_acr` | Explicit connection name; generated federated credential uses `ado-acr-<24-character-hash>` from project ID and connection name. | `sc-orders-acrbaccidmpoc-prod-001` |
+| `ado_service_connection_azurerm` | Explicit connection name; generated federated credential uses `ado-azurerm-<24-character-hash>` from project ID and connection name. | `sc-orders-azurerm-prod-001` |
+| `adf` | Module derives `adf-<region>-<name>-<env>-<suffix>` and `shir-<name>-<env>-<suffix>`. | `adf-cc-template-dev-601` |
+| `aks` | Root uses `aks-<workload>-<environment>`; module generator supports `<prefix>-<app>-<env>-<location>-<suffix>`. | `aks-template-dev` |
+| `applicationgateway` | Root uses `agw-<workload>-<environment>`; nested names come from frontend/backend/listener map keys. | `agw-template-dev` |
+| `appregistration` | Display name uses `appreg-<workload>-<environment>`. | `appreg-template-dev` |
+| `appservice` | Root uses `app-<workload>-<environment>`; private endpoint names use `pep-<app_name>-sites`. | `app-template-dev`, `pep-app-template-dev-sites` |
+| `appserviceplan` | Root/shared uses `asp-<workload>-<environment>`; diagnostics use `<name>-diagnostic-setting`. | `asp-template-dev` |
+| `automationaccount` | Root uses `aa-<workload>-<environment>`; module generator supports `<prefix>-<app>-<env>-<location>-<suffix>`. | `aa-template-dev` |
+| `availabilityset` | Root sample and module generator use `avail-<workload>-<region-code>-<environment>-<instance>`. | `avail-template-cc-dev-001` |
+| `bastion` | Module-generated name uses `bas-<workload>-<location-code>-<environment>-<instance>`. | `bas-platform-cc-dev-001` |
+| `azure_ai_search` | Root uses `srch-<workload>-<environment>`. | `srch-template-dev` |
+| `azure_ai_service` | Root uses `ais-<workload>-<environment>`; module generator supports `<prefix>-<app>-<env>-<location>-<suffix>`. | `ais-template-dev` |
+| `containerapp` | Module fallback and root sample use `ca-<workload>-<region-code>-<environment>-<instance>`. | `ca-template-cc-dev-001` |
+| `cosmosdb` | Root uses `cosmos-<workload>-<environment>`. | `cosmos-template-dev` |
+| `databricks` | Root uses `dbw-<workload>-<environment>`. | `dbw-template-dev` |
+| `enterpriseapplication` | No root-generated Azure resource name; it binds to an app registration/application ID. | n/a |
+| `eventgridsystemtopic` | Module-generated name uses `egt-<workload>-<location-code>-<environment>-<instance>`, capped at 50 characters. | `egt-platform-cc-dev-001` |
+| `eventhub` | Root uses `evh-<workload>-<environment>`; module generator supports `<prefix>-<app>-<env>-<location>-<suffix>`. | `evh-template-dev` |
+| `firewall` | Root uses `afw-<workload>-<environment>`. | `afw-template-dev` |
+| `fortigate` | Root passes `fgt-<workload>-<environment>` as `name_prefix`; nested resources include `lb-<prefix>-internal`, `lb-<prefix>-external`, and `pip-<prefix>-external-lb`. | `fgt-template-dev`, `lb-fgt-template-dev-internal` |
+| `frontdoor` | Profile and endpoint default to `afd-<workload>-<environment>-<instance>`; origin group, origin, and route use `og-`, `origin-`, and `route-` prefixes. | `afd-platform-dev-001` |
+| `functionapp` | Root uses `func-<workload>-<environment>`. | `func-template-dev` |
+| `functionappflex` | Module-generated name uses `func-<workload>-<location-code>-<environment>-<instance>`, capped at 32 characters. | `func-platform-cc-dev-001` |
+| `keyvault` | Root/shared uses compact `kv<workload><region-code><environment>`; private endpoint uses `pep-<kv-name>`. | `kvtemplateccdev` |
+| `linuxvm` | Root passes shared `vm_name`; module creates `<vm_name><env-suffix>`, plus `nic-`, `pip-`, and `nsg-` wrappers. `linux_vm_custom_vm_names` replaces the generated name with exact per-VM names. | `vmtemplatede601`, `nic-vmtemplatede601` |
+| `loadbalancer` | Root uses explicit `loadbalancers[*].name`; fallback is `lb-<map-key>`. | `lb-001` |
+| `loganalytics` | Root/shared uses `law-<workload>-<environment>`. | `law-template-dev` |
+| `logicapp` | Root uses `logic-<workload>-<environment>`; private endpoint uses `pep-<name>-sites`. | `logic-template-dev` |
+| `managed_identity` | Root uses `id-<workload>-<environment>`; module accepts an explicit override or generates `id-<workload>-<region-code>-<environment>-<instance>`. | `id-template-dev`, `id-orders-deploy-cc-prod-001` |
+| `managementgroups` | Root uses `shared_management_group_name`; module can generate `mg-<display-name>-<random>`. | `mg-platform-dev` |
+| `nat_gateway` | Module-generated name uses `nat-<workload>-<location-code>-<environment>-<instance>`. | `nat-platform-cc-dev-001` |
+| `nsg` | Root uses `nsg-<workload>-<environment>`. | `nsg-template-dev` |
+| `openai` | Root uses `oai-<workload>-<environment>`; module generator supports `<prefix>-<app>-<env>-<location>-<suffix>`. | `oai-template-dev` |
+| `policy` | Root uses `allowed-location-<environment>` and display name `Allowed Location <ENV>`. | `allowed-location-dev` |
+| `private_dns` | Zone names are literal DNS zone keys; links and records use provided map keys/names. | `privatelink.azurewebsites.net` |
+| `private_endpoint` | Module fallback uses `pep-<workload>-<region-code>-<environment>-<instance>`; private service connection defaults to `psc-<private-endpoint-name>`. | `pep-template-cc-dev-001` |
+| `recovery_services_vault` | Module-generated name uses `rsv-<workload>-<region-code>-<environment>-<instance>`, capped at 50 characters. | `rsv-platform-cc-prod-001` |
+| `rg` | Root uses `shared_resource_group_name`; module generator supports `<prefix>-<workload>-<env>-<location>-<suffix>`. | `rg-platform-dev` |
+| `customrole` | Use a stable, descriptive Azure custom role display name and set a stable role definition GUID when cross-environment consistency is required. | `FortiGate Route Updater` |
+| `roleassignments` | Names are GUIDs or provided assignment names; no human-readable convention. | GUID |
+| `route_table` | Root uses `rt-<workload>-<environment>`. | `rt-template-dev` |
+| `servicebus` | Root uses `sb-<workload>-<environment>`; queues, topics, and subscriptions use map keys. | `sb-template-dev` |
+| `sqldb` | Root uses `sql-<workload>-<environment>` for server and `sqldb-<workload>-<environment>` for database; module generator supports `<prefix>-<app>-<env>-<location>-<suffix>`. | `sql-template-dev`, `sqldb-template-dev` |
+| `sqlmi` | Root uses `sqlmi-<workload>-<environment>`. | `sqlmi-template-dev` |
+| `sqlmi_db` | Root uses `sqlmidb-<workload>-<environment>`; the module's backward-compatible generated prefix is `sqmidb`. | `sqlmidb-template-dev`, `sqmidb-orders-dev-001` |
+| `sqlvm` | Module accepts explicit VM names or generates Windows-compatible names from `<prefix><workload><region-code><environment><instance>`, capped at 15 characters. | `sqlappccprod001` |
+| `staticwebapp` | Module-generated name uses `swa-<workload>-<location-code>-<environment>-<instance>`, capped at 60 characters. | `swa-platform-cc-dev-001` |
+| `storageaccount` | Root/shared uses compact `st<workload><region-code><environment>`; module generator uses compact alphanumeric-only names. | `sttemplateccdev` |
+| `subnet` | Subnet names are the stable keys in the `subnets` map; they are not generated from the VNet name. | `application`, `AzureBastionSubnet` |
+| `subscription_vending` | Root uses `sub-<workload>-<environment>`. | `sub-template-dev` |
+| `vnet` | Root uses `shared_vnet_name`; sample uses spoke-oriented naming. Module can generate `vnet-<app><location>-<random>`. | `vnet-spoke-platform-dev` |
+| `winvm` | Root passes shared `vm_name`; module creates `<app_vm><env-suffix>`, plus `nic-`, `pip-`, and `nsg-` wrappers. `winvm_custom_vm_names` replaces the generated name with exact per-VM names (max 15 characters). | `vmtemplatede601`, `nic-vmtemplatede601` |
+
+## Environment Suffixes Used By VM Modules
+
+The `linuxvm` and `winvm` modules append an environment-based numeric suffix to the VM base name.
+
+To skip the generated pattern, set `custom_vm_names` on the module (root: `linux_vm_custom_vm_names` / `winvm_custom_vm_names` in `terraform.tfvars`) with one exact name per VM. Each name is used as-is for the VM and its hostname, and the `nic-`, `pip-`, `nsg-`, and data disk names follow it. Windows names are limited to 15 characters.
+
+| Environment | First suffix |
+| --- | --- |
+| `prod` | `001` |
+| `staging` | `201` |
+| `qa` | `301` |
+| `dev` | `601` |
+| `poc` | `701` |
+| `test` | `801` |
+| `sbx` | `901` |
+
+For example, a root base of `vmtemplatede` in `dev` becomes `vmtemplatede601`.
+
+## Known Gaps
+
+- Linux and Windows VM modules currently receive the same root `local.vm_name`, so enabling both can create name collisions.
+- Some modules use the older root pattern `<rtype>-<workload>-<environment>` without region or instance.
+- Some newer modules support generated names with region and instance, but the root harness often passes explicit names instead.
+- Storage Account and Key Vault use compact names because of Azure resource constraints.
+- Several nested resources derive names from map keys, so caller-provided key naming matters.
+
+## Guidance For New Work
+
+1. Use the target convention for new root-wired module names.
+2. Include `region-code` and `instance` for newly added resources unless the Azure resource type cannot support the length, the resource is global, or region is not available when the name is generated.
+3. Use separate VM base names for Linux and Windows.
+4. Keep map keys lowercase and stable when they become Azure child resource names.
+5. Prefer explicit `name` inputs when replacing a legacy resource would be disruptive.
+
+## Terraform Identifiers
+
+- Variable, local, and resource names use `snake_case`, for example `variable "app_sqlmi" {}` and `resource "azurerm_mssql_managed_instance" "app_sqlmi" {}`.
+- Azure resource names, tags, and resource group names use hyphens where Azure allows them, for example `name = "app-sqlmi"`.
