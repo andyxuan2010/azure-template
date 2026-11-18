@@ -1,0 +1,68 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+VM_NAME="${localization_vm_name}"
+OS_SCRIPT_NAME="${localization_os_script_name}"
+VM_SCRIPT_NAME="${localization_vm_script_name}"
+VM_SCRIPT_BASE64="${localization_vm_script_content_base64}"
+LOCALIZATION_ROOT="/opt/localization"
+LOG_DIR="/var/log/localization"
+LOG_FILE="$${LOG_DIR}/localization-${localization_vm_name}.log"
+
+mkdir -p "$${LOCALIZATION_ROOT}" "$${LOG_DIR}"
+touch "$${LOG_FILE}"
+chmod 0600 "$${LOG_FILE}" || true
+exec > >(tee -a "$${LOG_FILE}") 2>&1
+
+log() {
+  printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
+}
+
+on_error() {
+  local status="$1"
+  local line="$2"
+  log "ERROR: localization failed at line $${line} with exit code $${status}"
+  exit "$${status}"
+}
+trap 'on_error "$?" "$${LINENO}"' ERR
+
+run_localization_script() {
+  local script_path="$1"
+  local description="$2"
+
+  if [ -z "$${script_path}" ]; then
+    log "$${description} is not configured; skipping."
+    return 0
+  fi
+
+  if [ ! -s "$${script_path}" ]; then
+    log "$${description} was not downloaded: $${script_path}; skipping."
+    return 0
+  fi
+
+  log "Running $${description}: $${script_path}"
+  /bin/bash "$${script_path}"
+  log "Completed $${description}: $${script_path}"
+}
+
+log "===== Linux VM localization start ====="
+log "VM name: $${VM_NAME}"
+log "Extension working directory: $${PWD}"
+
+if [ -n "$${OS_SCRIPT_NAME}" ]; then
+  run_localization_script "$${PWD}/$${OS_SCRIPT_NAME}" "OS localization script"
+else
+  log "OS localization script name is empty; skipping."
+fi
+
+VM_SCRIPT_PATH=""
+if [ -n "$${VM_SCRIPT_NAME}" ] && [ -n "$${VM_SCRIPT_BASE64}" ]; then
+  VM_SCRIPT_PATH="$${LOCALIZATION_ROOT}/$${VM_SCRIPT_NAME}"
+  printf '%s' "$${VM_SCRIPT_BASE64}" | base64 -d >"$${VM_SCRIPT_PATH}"
+  chmod 0700 "$${VM_SCRIPT_PATH}"
+elif [ -n "$${VM_SCRIPT_NAME}" ]; then
+  VM_SCRIPT_PATH="$${PWD}/$${VM_SCRIPT_NAME}"
+fi
+
+run_localization_script "$${VM_SCRIPT_PATH}" "VM-specific localization script"
+log "===== Linux VM localization complete ====="

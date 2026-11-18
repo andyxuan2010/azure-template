@@ -1,0 +1,19 @@
+name: Terraform init
+description: Run terraform init with the shared retry logic in scripts/azure-pipelines/terraform_common.sh.
+
+inputs:
+  args:
+    description: Arguments passed to terraform init.
+    required: false
+    default: "-input=false -no-color -reconfigure"
+
+runs:
+  using: composite
+  steps:
+    - name: Terraform init with retries
+      shell: bash
+      env:
+        INIT_ARGS: ${{ inputs.args }}
+      run: |
+        source scripts/azure-pipelines/terraform_common.sh
+        terraform_init_with_retry $INIT_ARGS
