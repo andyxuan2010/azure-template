@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2172" height="800" viewBox="0 0 2172 800" role="img" aria-labelledby="title desc">
+<title id="title">CI/CD Pipeline Workflow – Deploy Azure Resources</title>
+<desc id="desc">A developer pushes infrastructure code to Azure DevOps Git, triggering an authorized pipeline on a self-hosted agent. An Azure Resource Manager service connection uses workload identity federation with an existing user-assigned managed identity to obtain a short-lived Azure token. The pipeline deploys resources within caller-owned Azure RBAC scope. Terraform state requires separate storage permissions and connectivity.</desc>
+<defs>
+<linearGradient id="banner" x2="1" y2="1"><stop stop-color="#104d85"/><stop offset="1" stop-color="#0b3e71"/></linearGradient>
+<linearGradient id="card" x2="0" y2="1"><stop stop-color="#f6f9fc"/><stop offset="1" stop-color="#e8eff7"/></linearGradient>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#111827"/></marker>
+<style>text{font-family:Segoe UI,Arial,sans-serif;fill:#101828} .bold{font-weight:700}.muted{fill:#344054}.link{fill:none;stroke:#111827;stroke-width:4;marker-end:url(#arrow)}.label{font-size:23px;font-weight:600}.body{font-size:24px}.small{font-size:22px}.heading{font-size:28px;font-weight:700}</style>
+</defs>
+<rect width="2172" height="800" fill="white"/>
+<rect x="370" y="16" width="1432" height="88" rx="22" fill="url(#banner)"/>
+<text x="1086" y="73" text-anchor="middle" style="fill:white;font-size:44px;font-weight:700">CI/CD Pipeline Workflow – Deploy Azure Resources</text>
+<rect x="20" y="225" width="220" height="250" rx="20" fill="url(#card)" stroke="#667085" stroke-width="2.5"/>
+<rect x="75" y="270" width="110" height="75" rx="6" fill="#153f60"/><rect x="83" y="278" width="94" height="59" fill="#23adf2"/><path d="M75 345H185L205 365H55Z" fill="#28618c"/><path d="M115 296H143V321H115Z" fill="#b9e9ff"/>
+<text x="130" y="410" class="heading" text-anchor="middle">Developer</text>
+<text x="130" y="443" class="small" text-anchor="middle">Home laptop</text>
+<rect x="380" y="180" width="270" height="340" rx="20" fill="url(#card)" stroke="#667085" stroke-width="2.5"/>
+<text x="515" y="225" class="heading" text-anchor="middle">Azure DevOps</text>
+<text x="515" y="256" class="heading" text-anchor="middle">(ADO)</text>
+<rect x="473" y="292" width="84" height="84" rx="9" transform="rotate(45 515 334)" fill="#f45132"/><path d="M495 305L534 344M509 320V357" stroke="white" stroke-width="5" fill="none"/><g fill="white"><circle cx="495" cy="305" r="7"/><circle cx="534" cy="344" r="7"/><circle cx="509" cy="357" r="7"/></g>
+<text x="515" y="444" class="heading" text-anchor="middle">Source Code Repo</text>
+<text x="515" y="478" class="small" text-anchor="middle">Git / infrastructure code</text>
+<rect x="790" y="180" width="390" height="340" rx="20" fill="url(#card)" stroke="#0078d4" stroke-width="2.5"/>
+<text x="985" y="225" class="heading" text-anchor="middle">Azure DevOps Pipeline</text>
+<text x="985" y="259" class="small" text-anchor="middle">Explicitly authorized pipeline</text>
+<rect x="814" y="280" width="342" height="213" rx="20" fill="#cce7fc"/>
+<rect x="940" y="302" width="90" height="24" rx="5" fill="#22577e" stroke="#102f4e" stroke-width="3"/><circle cx="952" cy="314" r="4" fill="#78db90"/>
+<rect x="940" y="330" width="90" height="24" rx="5" fill="#22577e" stroke="#102f4e" stroke-width="3"/><circle cx="952" cy="342" r="4" fill="#78db90"/>
+<rect x="940" y="358" width="90" height="24" rx="5" fill="#22577e" stroke="#102f4e" stroke-width="3"/><circle cx="952" cy="370" r="4" fill="#78db90"/>
+<text x="985" y="419" class="heading" text-anchor="middle">Self-Hosted Agent</text>
+<text x="985" y="452" class="body" text-anchor="middle">Validate / plan / deploy</text>
+<rect x="1320" y="160" width="320" height="380" rx="20" fill="url(#card)" stroke="#0078d4" stroke-width="2.5"/>
+<image href="data:image/svg+xml;base64,PHN2ZyBpZD0idXVpZC1mZGQ3NjgwZS04YWNlLTQ0MWEtOGEzYS03MzQxMGMzYjFmMjEiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjE4IiBoZWlnaHQ9IjE4IiB2aWV3Qm94PSIwIDAgMTggMTgiPjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0idXVpZC0zOGMwNzk3Ny1hYjlhLTQ4ZWItYTY2OC1jZGEzMTAyYmJkODUiIHgxPSI3LjY5NyIgeTE9Ijc3OS4xNjgiIHgyPSIxNC4wODIiIHkyPSI3ODYuNjMxIiBncmFkaWVudFRyYW5zZm9ybT0idHJhbnNsYXRlKDAgNzkxLjUxNikgc2NhbGUoMSAtMSkiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMyMjUwODYiIC8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMDA1NWM1IiAvPjwvbGluZWFyR3JhZGllbnQ+PGxpbmVhckdyYWRpZW50IGlkPSJ1dWlkLWFlZDRhN2JjLWIzODAtNGMzNC1iODQxLTJkMGYzNGQyNGYxNyIgeDE9IjYuMzY0IiB5MT0iNzc4LjE2NCIgeDI9IjYuMzY0IiB5Mj0iNzk0LjQxMiIgZ3JhZGllbnRUcmFuc2Zvcm09InRyYW5zbGF0ZSgwIDc5MS41MTYpIHNjYWxlKDEgLTEpIiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjNmRmIiAvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzAyOTRlNCIgLz48L2xpbmVhckdyYWRpZW50PjxsaW5lYXJHcmFkaWVudCBpZD0idXVpZC1lMmE3YjdmMi1iZjE2LTRhNzYtYmEyNy03ZDE0OWFiOGExOTQiIHgxPSI5LjAwMSIgeTE9Ijc3NS45NTYiIHgyPSI5LjAwMSIgeTI9Ijc5NC44NDUiIGdyYWRpZW50VHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCA3OTEuNTE2KSBzY2FsZSgxIC0xKSIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPjxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzQ0ZGJmOSIgLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjYmY4ZmYiIC8+PC9saW5lYXJHcmFkaWVudD48bGluZWFyR3JhZGllbnQgaWQ9InV1aWQtYzY3ZjMzNjQtMDcxYy00MWY5LWExNzUtZDNkZTFmODM3ZTBhIiB4MT0iMTMuNSIgeTE9Ijc3NC43MjEiIHgyPSIxMy41IiB5Mj0iNzkwLjc4MiIgZ3JhZGllbnRUcmFuc2Zvcm09InRyYW5zbGF0ZSgwIDc5MS41MTYpIHNjYWxlKDEgLTEpIiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMDQxNjQyIiAvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzA0MTY0MiIgc3RvcC1vcGFjaXR5PSIuMjUiIC8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PGc+PHBhdGggZD0ibTE3LjY0Nyw5LjkwNkwxMC4xNDcsMS40NDVjLS41OTktLjY3Ni0xLjY5NC0uNjc2LTIuMjk0LDBMLjM1Myw5LjkwNmMtLjU3OS42NTQtLjQyOCwxLjY0MS4zMjMsMi4xMTFsNy40OTksNC42ODhjLjUuMzEzLDEuMTQ4LjMxMywxLjY0OCwwbDcuNDk5LTQuNjg4Yy43NTEtLjQ2OS45MDItMS40NTcuMzIzLTIuMTExaDBaIiBmaWxsPSJ1cmwoI3V1aWQtMzhjMDc5NzctYWI5YS00OGViLWE2NjgtY2RhMzEwMmJiZDg1KSIgc3Ryb2tlLXdpZHRoPSIwIiAvPjxwYXRoIGQ9Im0xMC4xNDgsMS40NDVjLS41OTktLjY3Ni0xLjY5NC0uNjc2LTIuMjk0LDBMLjM1NCw5LjkwNmMtLjU3OS42NTQtLjQyOCwxLjY0MS4zMjMsMi4xMTEsMCwwLDIuNzc2LDEuNzM1LDMuMTI2LDEuOTU0LjM4OC4yNDIsMS4wMzMuNTExLDEuNzE1LjUxMS42MjEsMCwxLjE5Ny0uMTgsMS42NzYtLjQ4NywwLDAsMCwwLC4wMDItLjAwMWwxLjgwNC0xLjEyOC00LjM2NC0yLjcyOCw0LjQ3NC01LjA0N2MuNTUtLjYyNywxLjM3Ny0xLjAyNiwyLjMwMi0xLjAyNi40NzIsMCwuOTE3LjEwNywxLjMxNC4yOTJsLTIuNTc5LTIuOTA5di0uMDAyWiIgZmlsbD0idXJsKCN1dWlkLWFlZDRhN2JjLWIzODAtNGMzNC1iODQxLTJkMGYzNGQyNGYxNykiIHN0cm9rZS13aWR0aD0iMCIgLz48cG9seWdvbiBwb2ludHM9IjQuNjM2IDEwLjEzOCA0LjY4OCAxMC4xNyA5LjAwMSAxMi44NjYgOS4wMDEgMTIuODY2IDEzLjM2NSAxMC4xMzggMTMuMzY2IDEwLjEzOCAxMy4zNjUgMTAuMTM4IDkuMDAxIDUuMjE0IDQuNjM2IDEwLjEzOCIgZmlsbD0idXJsKCN1dWlkLWUyYTdiN2YyLWJmMTYtNGE3Ni1iYTI3LTdkMTQ5YWI4YTE5NCkiIHN0cm9rZS13aWR0aD0iMCIgLz48cGF0aCBkPSJtOS4wMDEsMTYuOTM5Yy4yODcsMCwuNTc0LS4wNzguODI0LS4yMzRsNy40OTktNC42ODhjLjc1MS0uNDY5LjkwMi0xLjQ1Ny4zMjMtMi4xMTFMMTAuMTQ4LDEuNDQ1Yy0uMy0uMzM4LS43MjMtLjUwNy0xLjE0Ny0uNTA3djE2LjAwMVoiIGZpbGw9InVybCgjdXVpZC1jNjdmMzM2NC0wNzFjLTQxZjktYTE3NS1kM2RlMWY4MzdlMGEpIiBmaWxsLW9wYWNpdHk9Ii41IiBpc29sYXRpb249Imlzb2xhdGUiIG9wYWNpdHk9Ii41IiBzdHJva2Utd2lkdGg9IjAiIC8+PC9nPjxnPjxwYXRoIGlkPSJ1dWlkLWY2NjQ4ZDg2LTA0OGEtNGY0MC1hNmRmLTdjZTEyMDExNmE5OCIgZD0ibTE2LjUxMiwxMC44MzFjLjQ2NC0uNDU4LjQ2OC0xLjIwNi4wMS0xLjY3LS4wMDMtLjAwMy0uMDA2LS4wMDYtLjAxLS4wMWgwbC0yLjAzNS0yLjAzNWMtLjQ2MS0uNDYxLTEuMjA4LS40NjEtMS42NjksMGgwbC0yLjAzNSwyLjAzNWMtLjQ1Ni40NjctLjQ1NiwxLjIxMywwLDEuNjc5bDEuNywxLjdjLjA2MS4wNjMuMDk0LjE0Ny4wOTIuMjM0djMuMTU1Yy0uMDAzLjEwOC4wNDEuMjEzLjEyMi4yODVsLjc3My43NzNjLjA5NS4xMDQuMjU1LjExMi4zNTkuMDE3LjAwNi0uMDA1LjAxMi0uMDExLjAxNy0uMDE3bC43NDMtLjc0M2gwbC40NDgtLjQ0OGMuMDU4LS4wNTkuMDU4LS4xNTQsMC0uMjE0bC0uMzE2LS4zMTVjLS4wNjctLjA1OS0uMDc0LS4xNjItLjAxNC0uMjMuMDA1LS4wMDUuMDA5LS4wMS4wMTQtLjAxNGwuMzE2LS4zMTZjLjA1OS0uMDYzLjA1OS0uMTYxLDAtLjIyNGwtLjMxNi0uMzE2Yy0uMDY1LS4wNTQtLjA3My0uMTUtLjAxOS0uMjE1LjAwNi0uMDA3LjAxMi0uMDEzLjAxOS0uMDE5bC4zMTYtLjMyNmMuMDU4LS4wNTkuMDU4LS4xNTQsMC0uMjE0bC0uNDQ4LS40NDh2LS4xNjNsMS45MzQtMS45NDRabS0yLjg3LTMuMjI2Yy4zNzEsMCwuNjcyLjMwMS42NzIuNjcycy0uMzAxLjY3Mi0uNjcyLjY3Mi0uNjcyLS4zMDEtLjY3Mi0uNjcyaDBjMC0uMzcxLjMwMS0uNjcyLjY3Mi0uNjcyWiIgZmlsbD0iI2ZmY2EwMCIgc3Ryb2tlLXdpZHRoPSIwIiAvPjxwYXRoIGlkPSJ1dWlkLWUxNjk3YmY0LThlNWQtNGQ2Mi05MGM5LTY1NjlkNzlkNDk0NCIgZD0ibTEzLjEzMywxNi4wNDJoMGMuMDU1LjA1Ny4xNDUuMDU4LjIwMS4wMDMuMDMxLS4wMy4wNDctLjA3Mi4wNDMtLjExNXYtMi42MDVjLjAwMi0uMDUxLS4wMjEtLjEtLjA2MS0uMTMyaDBjLS4wNjQtLjA0NS0uMTUzLS4wMy0uMTk5LjAzNC0uMDIuMDI5LS4wMjkuMDY0LS4wMjUuMDk4djIuNTU1Yy0uMDIuMDU4LS4wMDQuMTIyLjA0MS4xNjNaIiBmaWxsPSIjZmY5MzAwIiBpc29sYXRpb249Imlzb2xhdGUiIG9wYWNpdHk9Ii43NSIgc3Ryb2tlLXdpZHRoPSIwIiAvPjxyZWN0IGlkPSJ1dWlkLWM5MzBkNGMyLTlmNDEtNDhjNy1hZGY3LWFjYmQ3M2FmNmZiZiIgeD0iMTIuMDE0IiB5PSI5LjgzNCIgd2lkdGg9IjMuMzQ4IiBoZWlnaHQ9Ii4zOTciIHJ4PSIuMTgzIiByeT0iLjE4MyIgZmlsbD0iI2ZmOTMwMCIgaXNvbGF0aW9uPSJpc29sYXRlIiBvcGFjaXR5PSIuNzUiIHN0cm9rZS13aWR0aD0iMCIgLz48cmVjdCBpZD0idXVpZC03NTVhYWE0Ni04Yjg5LTQ1ZjUtOWRhMC04YTQyNzgyYzVkZGQiIHg9IjEyLjAxNCIgeT0iMTAuNDc1IiB3aWR0aD0iMy4zNDgiIGhlaWdodD0iLjM5NyIgcng9Ii4xODMiIHJ5PSIuMTgzIiBmaWxsPSIjZmY5MzAwIiBpc29sYXRpb249Imlzb2xhdGUiIG9wYWNpdHk9Ii43NSIgc3Ryb2tlLXdpZHRoPSIwIiAvPjwvZz48L3N2Zz4=" x="1443" y="187" width="74" height="74"/>
+<text x="1480" y="287" class="heading" text-anchor="middle">Azure Resource</text>
+<text x="1480" y="319" class="heading" text-anchor="middle">Manager</text>
+<text x="1480" y="351" class="heading" text-anchor="middle">Service Connection</text>
+<text x="1480" y="400" class="small" text-anchor="middle">Workload identity federation</text>
+<text x="1480" y="435" class="small" text-anchor="middle">Existing managed identity</text>
+<text x="1480" y="470" class="small" text-anchor="middle">Short-lived Azure token</text>
+<text x="1480" y="508" class="small" text-anchor="middle">No client secret</text>
+<rect x="1780" y="180" width="372" height="340" rx="20" fill="url(#card)" stroke="#667085" stroke-width="2.5"/>
+<image href="data:image/svg+xml;base64,PHN2ZyBpZD0iYTY4NWNjOGMtMzJiYS00ZDU0LTkxZGEtM2ExMjVjYjU4ZGVkIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48dGl0bGU+SWNvbi1nZW5lcmFsLTc8L3RpdGxlPjxnPjxnPjxwYXRoIGQ9Ik0uNSwxNS4wOGEuMTYuMTYsMCwwLDAsLjA4LjE0bDEuMTYuNjVMMy43LDE3YS4xNy4xNywwLDAsMCwuMjMtLjA2bC42Ni0xLjEyYS4xNi4xNiwwLDAsMC0uMDYtLjIxbC0yLjMtMS4zYS4xNy4xNywwLDAsMS0uMDgtLjE0VjMuODVhLjE2LjE2LDAsMCwxLC4wOC0uMTRsMi4zLTEuM2EuMTYuMTYsMCwwLDAsLjA2LS4yMUwzLjkzLDEuMDhBLjE3LjE3LDAsMCwwLDMuNywxTDEuNzgsMi4xMWwtMS4yLjY3YS4xNi4xNiwwLDAsMC0uMDguMTRWMTUuMDhaIiBmaWxsPSIjOTQ5NDk0IiAvPjxwYXRoIGQ9Ik0yLjE0LDMuNzdsLjA2LS4wNiwyLjMtMS4zYS4xNC4xNCwwLDAsMCwuMDYtLjIxTDMuOSwxLjA4QS4xNS4xNSwwLDAsMCwzLjY4LDFMMS43NSwyLjExLjU2LDIuNzhzLS4wNSwwLS4wNi4wNmwuOS41MVoiIGZpbGw9IiNhM2EzYTMiIC8+PHBhdGggZD0iTTQuNSwxNS41OWwtMi4zLTEuM2EuMjIuMjIsMCwwLDEtLjA3LS4wOWwtMS42MiwxLC4wNSwwLDEuMTUuNjUsMiwxLjExYS4xNS4xNSwwLDAsMCwuMjItLjA2bC42Ni0xLjEyQS4xNC4xNCwwLDAsMCw0LjUsMTUuNTlaIiBmaWxsPSIjYTNhM2EzIiAvPjwvZz48cGF0aCBkPSJNMTcuNSwxNS4wOGEuMTYuMTYsMCwwLDEtLjA4LjE0bC0xLjE2LjY1TDE0LjMsMTdhLjE3LjE3LDAsMCwxLS4yMy0uMDZsLS42Ni0xLjEyYS4xNi4xNiwwLDAsMSwuMDYtLjIxbDIuMy0xLjNhLjE3LjE3LDAsMCwwLC4wOC0uMTRWMy44NWEuMTYuMTYsMCwwLDAtLjA4LS4xNGwtMi4zLTEuM2EuMTYuMTYsMCwwLDEtLjA2LS4yMWwuNjYtMS4xMkEuMTcuMTcsMCwwLDEsMTQuMywxbDEuOTIsMS4wOSwxLjIuNjdhLjE2LjE2LDAsMCwxLC4wOC4xNFYxNS4wOFoiIGZpbGw9IiM5NDk0OTQiIC8+PHBhdGggZD0iTTE1Ljg2LDMuNzdsLS4wNi0uMDYtMi4zLTEuM2EuMTQuMTQsMCwwLDEtLjA2LS4yMWwuNjYtMS4xMkEuMTUuMTUsMCwwLDEsMTQuMzIsMWwxLjkzLDEuMDksMS4xOS42N3MwLDAsLjA2LjA2bC0uOS41MVoiIGZpbGw9IiNhM2EzYTMiIC8+PHBhdGggZD0iTTEzLjUsMTUuNTlsMi4zLTEuM2EuMjIuMjIsMCwwLDAsLjA3LS4wOWwxLjYyLDEsMCwwLTEuMTUuNjUtMiwxLjExYS4xNS4xNSwwLDAsMS0uMjItLjA2bC0uNjYtMS4xMkEuMTQuMTQsMCwwLDEsMTMuNSwxNS41OVoiIGZpbGw9IiNhM2EzYTMiIC8+PHBvbHlnb24gcG9pbnRzPSIxNC4zMSA1LjkzIDE0LjMxIDEyLjA3IDguOTkgMTUuMTYgOC45OSA5LjAxIDE0LjMxIDUuOTMiIGZpbGw9IiMzMmJlZGQiIC8+PHBvbHlnb24gcG9pbnRzPSIxNC4zMSA1LjkzIDkgOS4wMiAzLjY4IDUuOTMgOSAyLjg0IDE0LjMxIDUuOTMiIGZpbGw9IiM5Y2ViZmYiIC8+PHBvbHlnb24gcG9pbnRzPSI4Ljk5IDkuMDIgOC45OSAxNS4xNiAzLjY4IDEyLjA3IDMuNjggNS45MyA4Ljk5IDkuMDIiIGZpbGw9IiM1MGU2ZmYiIC8+PHBvbHlnb24gcG9pbnRzPSIzLjY4IDEyLjA3IDguOTkgOS4wMSA4Ljk5IDE1LjE2IDMuNjggMTIuMDciIGZpbGw9IiM5Y2ViZmYiIC8+PHBvbHlnb24gcG9pbnRzPSIxNC4zMSAxMi4wNyA4Ljk5IDkuMDEgOC45OSAxNS4xNiAxNC4zMSAxMi4wNyIgZmlsbD0iIzUwZTZmZiIgLz48L2c+PC9zdmc+" x="1922" y="208" width="88" height="88"/>
+<text x="1966" y="339" class="heading" text-anchor="middle">Azure Deployment Scope</text>
+<text x="1966" y="382" class="body" text-anchor="middle">Resource group / resources</text>
+<text x="1966" y="416" class="body" text-anchor="middle">Caller-owned scoped RBAC</text>
+<text x="1966" y="478" class="heading" text-anchor="middle">Deploy and verify</text>
+<path d="M240 350H375" class="link"/>
+<circle cx="310" cy="260" r="18" fill="#0078d4"/>
+<text x="310" y="268" text-anchor="middle" style="fill:white;font-size:25px;font-weight:700">1</text>
+<text x="310" y="304" class="label" text-anchor="middle">Push code</text>
+<path d="M650 350H785" class="link"/>
+<circle cx="720" cy="260" r="18" fill="#0078d4"/>
+<text x="720" y="268" text-anchor="middle" style="fill:white;font-size:25px;font-weight:700">2</text>
+<text x="720" y="304" class="label" text-anchor="middle">Trigger</text>
+<text x="720" y="331" class="label" text-anchor="middle">pipeline</text>
+<path d="M1180 350H1315" class="link"/>
+<circle cx="1250" cy="260" r="18" fill="#0078d4"/>
+<text x="1250" y="268" text-anchor="middle" style="fill:white;font-size:25px;font-weight:700">3</text>
+<text x="1250" y="304" class="label" text-anchor="middle">Federated</text>
+<text x="1250" y="331" class="label" text-anchor="middle">sign-in</text>
+<path d="M1640 350H1775" class="link"/>
+<circle cx="1710" cy="260" r="18" fill="#0078d4"/>
+<text x="1710" y="268" text-anchor="middle" style="fill:white;font-size:25px;font-weight:700">4</text>
+<text x="1710" y="304" class="label" text-anchor="middle">Deploy via</text>
+<text x="1710" y="331" class="label" text-anchor="middle">Azure APIs</text>
+<image href="data:image/svg+xml;base64,PHN2ZyBpZD0iZjJmMDQzNDktOGFlZS00NDEzLTg0YzktYTkwNTM2MTFiMzE5IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImFkNGM0Zjk2LTA5YWEtNGY5MS1iYTEwLTVjYjhhZDUzMGY3NCIgeDE9IjkiIHkxPSIxNS44MyIgeDI9IjkiIHkyPSI1Ljc5IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjYjNiM2IzIiAvPjxzdG9wIG9mZnNldD0iMC4yNiIgc3RvcC1jb2xvcj0iI2MxYzFjMSIgLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNlNmU2ZTYiIC8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHRpdGxlPkljb24tc3RvcmFnZS04NjwvdGl0bGU+PHBhdGggZD0iTS41LDUuNzloMTdhMCwwLDAsMCwxLDAsMHY5LjQ4YS41Ny41NywwLDAsMS0uNTcuNTdIMS4wN2EuNTcuNTcsMCwwLDEtLjU3LS41N1Y1Ljc5QTAsMCwwLDAsMSwuNSw1Ljc5WiIgZmlsbD0idXJsKCNhZDRjNGY5Ni0wOWFhLTRmOTEtYmExMC01Y2I4YWQ1MzBmNzQpIiAvPjxwYXRoIGQ9Ik0xLjA3LDIuMTdIMTYuOTNhLjU3LjU3LDAsMCwxLC41Ny41N1Y1Ljc5YTAsMCwwLDAsMSwwLDBILjVhMCwwLDAsMCwxLDAsMFYyLjczQS41Ny41NywwLDAsMSwxLjA3LDIuMTdaIiBmaWxsPSIjMzdjMmIxIiAvPjxwYXRoIGQ9Ik0yLjgxLDYuODlIMTUuMThhLjI3LjI3LDAsMCwxLC4yNi4yN3YxLjRhLjI3LjI3LDAsMCwxLS4yNi4yN0gyLjgxYS4yNy4yNywwLDAsMS0uMjYtLjI3VjcuMTZBLjI3LjI3LDAsMCwxLDIuODEsNi44OVoiIGZpbGw9IiNmZmYiIC8+PHBhdGggZD0iTTIuODIsOS42OEgxNS4xOWEuMjcuMjcsMCwwLDEsLjI2LjI3djEuNDFhLjI3LjI3LDAsMCwxLS4yNi4yN0gyLjgyYS4yNy4yNywwLDAsMS0uMjYtLjI3VjEwQS4yNy4yNywwLDAsMSwyLjgyLDkuNjhaIiBmaWxsPSIjMzdjMmIxIiAvPjxwYXRoIGQ9Ik0yLjgyLDEyLjVIMTUuMTlhLjI3LjI3LDAsMCwxLC4yNi4yN3YxLjQxYS4yNy4yNywwLDAsMS0uMjYuMjdIMi44MmEuMjcuMjcsMCwwLDEtLjI2LS4yN1YxMi43N0EuMjcuMjcsMCwwLDEsMi44MiwxMi41WiIgZmlsbD0iIzI1ODI3NyIgLz48L3N2Zz4=" x="1750" y="555" width="46" height="46"/>
+<text x="1966" y="570" class="small" text-anchor="middle">Terraform state access:</text>
+<text x="1966" y="601" class="small" text-anchor="middle">Storage RBAC + network / DNS</text>
+<text x="1086" y="633" class="small" text-anchor="middle">The module provisions the service connection, federated trust and explicit pipeline grants; workload infrastructure remains caller-owned.</text>
+<rect x="16" y="675" width="2140" height="110" rx="20" fill="url(#card)" stroke="#667085" stroke-width="2.5"/>
+<path d="M36 675H276V785H36Q16 785 16 765V695Q16 675 36 675Z" fill="url(#banner)"/>
+<text x="146" y="740" text-anchor="middle" style="fill:white;font-size:29px;font-weight:700">Steps Summary</text>
+<circle cx="327" cy="706" r="18" fill="#0078d4"/>
+<text x="327" y="714" text-anchor="middle" style="fill:white;font-size:25px;font-weight:700">1</text>
+<text x="365" y="708" class="body" text-anchor="start">Developer pushes</text>
+<text x="365" y="736" class="body" text-anchor="start">infrastructure code</text>
+<text x="365" y="764" class="body" text-anchor="start">to the ADO Git repo.</text>
+<path d="M749 691V770" stroke="#c4cdd8" stroke-width="2"/>
+<circle cx="788" cy="706" r="18" fill="#0078d4"/>
+<text x="788" y="714" text-anchor="middle" style="fill:white;font-size:25px;font-weight:700">2</text>
+<text x="826" y="708" class="body" text-anchor="start">Push triggers an</text>
+<text x="826" y="736" class="body" text-anchor="start">authorized pipeline on</text>
+<text x="826" y="764" class="body" text-anchor="start">a self-hosted agent.</text>
+<path d="M1210 691V770" stroke="#c4cdd8" stroke-width="2"/>
+<circle cx="1249" cy="706" r="18" fill="#0078d4"/>
+<text x="1249" y="714" text-anchor="middle" style="fill:white;font-size:25px;font-weight:700">3</text>
+<text x="1287" y="708" class="body" text-anchor="start">Service connection uses</text>
+<text x="1287" y="736" class="body" text-anchor="start">federation to obtain a</text>
+<text x="1287" y="764" class="body" text-anchor="start">short-lived Azure token.</text>
+<path d="M1671 691V770" stroke="#c4cdd8" stroke-width="2"/>
+<circle cx="1710" cy="706" r="18" fill="#0078d4"/>
+<text x="1710" y="714" text-anchor="middle" style="fill:white;font-size:25px;font-weight:700">4</text>
+<text x="1748" y="708" class="body" text-anchor="start">Agent deploys resources</text>
+<text x="1748" y="736" class="body" text-anchor="start">within the identity’s</text>
+<text x="1748" y="764" class="body" text-anchor="start">assigned Azure RBAC scope.</text>
+</svg>
