@@ -1,0 +1,288 @@
+parameters:
+  - name: stageName
+    type: string
+  - name: displayName
+    type: string
+  - name: dependsOn
+    type: string
+  - name: azureServiceConnection
+    type: string
+  - name: environmentName
+    type: string
+  - name: webAppNamePrimary
+    type: string
+  - name: webAppNameSecondary
+    type: string
+    default: ""
+  - name: webAppNameThird
+    type: string
+    default: ""
+  - name: sourceBranch
+    type: string
+    default: ""
+  - name: stack
+    type: string
+    values:
+      - dotnet
+      - node
+      - python
+  - name: linuxRuntimeStack
+    type: string
+  - name: startupCommand
+    type: string
+    default: ""
+  - name: windowsRuntimeVersion
+    type: string
+    default: ""
+  - name: deploymentMode
+    type: string
+    default: remoteBuild
+    values:
+      - remoteBuild
+      - runFromPackage
+  - name: pythonPath
+    type: string
+    default: ""
+  - name: healthPath
+    type: string
+    default: /healthz
+
+stages:
+  - stage: ${{ parameters.stageName }}
+    displayName: ${{ parameters.displayName }}
+    dependsOn: ${{ parameters.dependsOn }}
+    ${{ if ne(parameters.sourceBranch, '') }}:
+      condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'), eq(variables['Build.SourceBranch'], '${{ parameters.sourceBranch }}'))
+    ${{ else }}:
+      condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - deployment: Deploy
+        displayName: ${{ parameters.displayName }}
+        environment: ${{ parameters.environmentName }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: shared-runner-hygiene.yml
+                  parameters:
+                    runPostJobCleanup: false
+
+                - download: current
+                  displayName: Download artifact
+                  artifact: drop
+
+                - task: AzureCLI@2
+                  displayName: Deploy and verify ZIP package
+                  inputs:
+                    azureSubscription: ${{ parameters.azureServiceConnection }}
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      set -euo pipefail
+
+                      test_scm_connectivity() {
+                        local host_name="$1"
+
+                        echo "Starting SCM connectivity preflight for ${host_name}..."
+                        echo "SCM DNS lookup results:"
+
+                        if getent ahosts "${host_name}" > /tmp/scm_dns.txt 2>/tmp/scm_dns_err.txt; then
+                          awk '!seen[$1 FS $2]++ { printf("SCM resolved address [%s]: %s\n", $2, $1) }' /tmp/scm_dns.txt
+                        else
+                          cat /tmp/scm_dns_err.txt || true
+                          if command -v nslookup >/dev/null 2>&1; then
+                            nslookup "${host_name}" || true
+                          fi
+                          echo "Failed to resolve ${host_name}. Ensure the runner can resolve the SCM hostname and reach TCP 443." >&2
+                          exit 1
+                        fi
+
+                        echo "SCM TCP probe: testing ${host_name}:443"
+                        if timeout 10 bash -c "cat < /dev/null > /dev/tcp/${host_name}/443" 2>/tmp/scm_tcp_err.txt; then
+                          echo "SCM TCP probe succeeded for ${host_name}:443."
+                        else
+                          cat /tmp/scm_tcp_err.txt || true
+                          echo "Failed to reach https://${host_name} from the build agent." >&2
+                          exit 1
+                        fi
+                      }
+
+                      configure_runtime() {
+                        local app_name="$1"
+                        local resource_group="$2"
+                        local app_os="$3"
+
+                        case "${STACK}" in
+                          dotnet)
+                            if [ "${app_os}" = "true" ]; then
+                              az webapp config set --resource-group "${resource_group}" --name "${app_name}" --linux-fx-version "${LINUX_RUNTIME_STACK}"
+                            elif [ "${app_os}" != "false" ]; then
+                              echo "Unsupported App Service OS value '${app_os}' for '${app_name}'." >&2
+                              exit 1
+                            fi
+                            ;;
+                          node)
+                            if [ "${app_os}" = "true" ]; then
+                              az webapp config set --resource-group "${resource_group}" --name "${app_name}" --linux-fx-version "${LINUX_RUNTIME_STACK}" --startup-file "${STARTUP_COMMAND}"
+                              az webapp config appsettings delete --resource-group "${resource_group}" --name "${app_name}" --setting-names WEBSITE_NODE_DEFAULT_VERSION || true
+                            elif [ "${app_os}" = "false" ]; then
+                              az webapp config appsettings set --resource-group "${resource_group}" --name "${app_name}" --settings WEBSITE_NODE_DEFAULT_VERSION="${WINDOWS_RUNTIME_VERSION}"
+                            else
+                              echo "Unsupported App Service OS value '${app_os}' for '${app_name}'." >&2
+                              exit 1
+                            fi
+                            ;;
+                          python)
+                            if [ "${app_os}" != "true" ]; then
+                              echo "Python deployment requires a Linux App Service; '${app_name}' reported reserved='${app_os}'." >&2
+                              exit 1
+                            fi
+                            az webapp config set --resource-group "${resource_group}" --name "${app_name}" --linux-fx-version "${LINUX_RUNTIME_STACK}" --startup-file "${STARTUP_COMMAND}"
+                            ;;
+                          *)
+                            echo "Unsupported application stack '${STACK}'." >&2
+                            exit 1
+                            ;;
+                        esac
+                      }
+
+                      configure_deployment_mode() {
+                        local app_name="$1"
+                        local resource_group="$2"
+
+                        if [ "${DEPLOYMENT_MODE}" = "remoteBuild" ]; then
+                          az webapp config appsettings delete --resource-group "${resource_group}" --name "${app_name}" --setting-names WEBSITE_RUN_FROM_PACKAGE PYTHONPATH || true
+                          if [ "${STACK}" = "node" ] || [ "${STACK}" = "python" ]; then
+                            az webapp config appsettings set --resource-group "${resource_group}" --name "${app_name}" --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true ENABLE_ORYX_BUILD=true
+                          else
+                            az webapp config appsettings delete --resource-group "${resource_group}" --name "${app_name}" --setting-names SCM_DO_BUILD_DURING_DEPLOYMENT ENABLE_ORYX_BUILD || true
+                          fi
+                        else
+                          az webapp config appsettings delete --resource-group "${resource_group}" --name "${app_name}" --setting-names SCM_DO_BUILD_DURING_DEPLOYMENT ENABLE_ORYX_BUILD || true
+                          if [ "${STACK}" = "python" ]; then
+                            az webapp config appsettings set --resource-group "${resource_group}" --name "${app_name}" --settings WEBSITE_RUN_FROM_PACKAGE=1 PYTHONPATH="${PYTHON_PATH}"
+                          else
+                            az webapp config appsettings delete --resource-group "${resource_group}" --name "${app_name}" --setting-names PYTHONPATH || true
+                            az webapp config appsettings set --resource-group "${resource_group}" --name "${app_name}" --settings WEBSITE_RUN_FROM_PACKAGE=1
+                          fi
+                        fi
+                      }
+
+                      verify_health() {
+                        local app_name="$1"
+                        local health_url="https://${app_name}.azurewebsites.net${HEALTH_PATH}"
+                        local attempt
+
+                        echo "Verifying application health at ${health_url}..."
+                        for attempt in $(seq 1 18); do
+                          if curl --fail --location --silent --show-error --connect-timeout 10 --max-time 20 "${health_url}" > /tmp/health_response.txt; then
+                            echo "Health verification succeeded for ${app_name} on attempt ${attempt}."
+                            cat /tmp/health_response.txt
+                            return 0
+                          fi
+                          echo "Health check attempt ${attempt}/18 failed; retrying in 10 seconds..."
+                          sleep 10
+                        done
+
+                        echo "Application '${app_name}' did not become healthy at ${health_url}." >&2
+                        timeout 30 az webapp log tail --resource-group "${CURRENT_RESOURCE_GROUP}" --name "${app_name}" || true
+                        exit 1
+                      }
+
+                      deploy_target() {
+                        local app_name="$1"
+                        local target_label="$2"
+
+                        if [ -z "${app_name}" ]; then
+                          if [ "${target_label}" = "primary" ]; then
+                            echo "The primary App Service target is required and cannot be blank." >&2
+                            exit 1
+                          fi
+                          echo "Optional ${target_label} App Service target is blank; skipping it."
+                          return 0
+                        fi
+
+                        local app_id
+                        local subscription_id
+                        local resource_group
+                        local app_os
+                        local scm_host="${app_name}.scm.azurewebsites.net"
+
+                        az account set --subscription "${SERVICE_SUBSCRIPTION_ID}"
+                        app_id="$(az resource list --name "${app_name}" --resource-type Microsoft.Web/sites --query '[0].id' --output tsv)"
+                        if [ -z "${app_id}" ]; then
+                          echo "Configured ${target_label} App Service '${app_name}' was not found." >&2
+                          exit 1
+                        fi
+
+                        subscription_id="$(cut -d/ -f3 <<< "${app_id}")"
+                        resource_group="$(cut -d/ -f5 <<< "${app_id}")"
+                        CURRENT_RESOURCE_GROUP="${resource_group}"
+
+                        echo "Deploying ${target_label} target '${app_name}' in resource group '${resource_group}'..."
+                        az account set --subscription "${subscription_id}"
+                        test_scm_connectivity "${scm_host}"
+
+                        app_os="$(az webapp show --resource-group "${resource_group}" --name "${app_name}" --query reserved --output tsv | tr '[:upper:]' '[:lower:]')"
+                        configure_runtime "${app_name}" "${resource_group}" "${app_os}"
+                        configure_deployment_mode "${app_name}" "${resource_group}"
+
+                        az webapp config appsettings set \
+                          --resource-group "${resource_group}" \
+                          --name "${app_name}" \
+                          --settings \
+                            APP_SERVICE_NAME="${app_name}" \
+                            APP_SERVICE_SUBSCRIPTION_ID="${subscription_id}" \
+                            APP_SERVICE_RESOURCE_GROUP="${resource_group}"
+
+                        if [ "${STACK}" = "python" ]; then
+                          local flask_secret_key
+                          flask_secret_key="$(az webapp config appsettings list \
+                            --resource-group "${resource_group}" \
+                            --name "${app_name}" \
+                            --query "[?name=='FLASK_SECRET_KEY'].value | [0]" \
+                            --output tsv)"
+                          if [ -z "${flask_secret_key}" ]; then
+                            flask_secret_key="$(openssl rand -base64 48 | tr -d '\n')"
+                            az webapp config appsettings set \
+                              --resource-group "${resource_group}" \
+                              --name "${app_name}" \
+                              --settings FLASK_SECRET_KEY="${flask_secret_key}" \
+                              --output none
+                            echo "Configured FLASK_SECRET_KEY for ${app_name}."
+                          fi
+                        fi
+
+                        az webapp deploy \
+                          --resource-group "${resource_group}" \
+                          --name "${app_name}" \
+                          --src-path "${PACKAGE_PATH}" \
+                          --type zip \
+                          --restart true \
+                          --track-status true
+
+                        verify_health "${app_name}"
+                      }
+
+                      SERVICE_SUBSCRIPTION_ID="$(az account show --query id --output tsv)"
+                      deploy_target "${WEB_APP_PRIMARY}" primary
+                      deploy_target "${WEB_APP_SECONDARY}" secondary
+                      deploy_target "${WEB_APP_THIRD}" third
+                  env:
+                    PACKAGE_PATH: $(Pipeline.Workspace)/drop/app.zip
+                    WEB_APP_PRIMARY: ${{ parameters.webAppNamePrimary }}
+                    WEB_APP_SECONDARY: ${{ parameters.webAppNameSecondary }}
+                    WEB_APP_THIRD: ${{ parameters.webAppNameThird }}
+                    STACK: ${{ parameters.stack }}
+                    LINUX_RUNTIME_STACK: ${{ parameters.linuxRuntimeStack }}
+                    STARTUP_COMMAND: ${{ parameters.startupCommand }}
+                    WINDOWS_RUNTIME_VERSION: ${{ parameters.windowsRuntimeVersion }}
+                    DEPLOYMENT_MODE: ${{ parameters.deploymentMode }}
+                    PYTHON_PATH: ${{ parameters.pythonPath }}
+                    HEALTH_PATH: ${{ parameters.healthPath }}
+
+                - template: shared-runner-hygiene.yml
+                  parameters:
+                    runInitialization: false
+                    runPreJobCleanup: false
+                    runCachePrep: false
